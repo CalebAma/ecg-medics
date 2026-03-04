@@ -37,6 +37,128 @@ function initPage(pageId) {
     if (pageId === 'page-request') setupRequestForm();
     if (pageId === 'page-history') renderHistory();
     if (pageId === 'page-profile') setupProfile();
+    if (pageId === 'page-admin') setupAdmin();
+}
+
+// Admin Specific Logic
+function setupAdmin() {
+    updateAdminStats();
+    renderAdminRequests();
+    renderAdminUsers();
+}
+
+function updateAdminStats() {
+    if (!document.getElementById('admin-stat-users')) return;
+    document.getElementById('admin-stat-users').textContent = users.length;
+    document.getElementById('admin-stat-pending').textContent = medicalRequests.filter(r => r.status === 'Pending').length;
+    document.getElementById('admin-stat-approved').textContent = medicalRequests.filter(r => r.status === 'Approved').length;
+    document.getElementById('admin-stat-rejected').textContent = medicalRequests.filter(r => r.status === 'Rejected').length;
+}
+
+function switchAdminTab(tab) {
+    const tabs = ['requests', 'users'];
+    tabs.forEach(t => {
+        document.getElementById(`tab-${t}`).classList.remove('active');
+        document.getElementById(`section-${t}`).classList.add('view-hidden');
+    });
+
+    document.getElementById(`tab-${tab}`).classList.add('active');
+    document.getElementById(`section-${tab}`).classList.remove('view-hidden');
+}
+
+function renderAdminRequests() {
+    const tbody = document.getElementById('admin-requests-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const sortedRequests = [...medicalRequests].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    sortedRequests.forEach(req => {
+        const staff = users.find(u => u.id === req.userId);
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-gray-50 transition-colors';
+
+        const statusClass = getStatusClass(req.status);
+
+        tr.innerHTML = `
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${new Date(req.timestamp).toLocaleDateString()}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-ecgBlue">${staff ? staff.staffId : 'Unknown'}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${req.dependantName}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${req.hospital}</td>
+            <td class="px-6 py-4 whitespace-nowrap"><span class="px-2 py-1 text-xs font-bold rounded-full border ${statusClass}">${req.status}</span></td>
+            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                ${req.status === 'Pending' ? `
+                    <button onclick="updateRequestStatus('${req.id}', 'Approved')" class="text-green-600 hover:bg-green-50 px-2 py-1 rounded">Approve</button>
+                    <button onclick="openAdminRejectModal('${req.id}')" class="text-red-600 hover:bg-red-50 px-2 py-1 rounded">Reject</button>
+                ` : `<span class="text-gray-400 italic">No actions</span>`}
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function renderAdminUsers() {
+    const tbody = document.getElementById('admin-users-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    users.forEach(user => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-gray-50';
+        tr.innerHTML = `
+            <td class="px-6 py-4 whitespace-nowrap">
+                <div class="flex items-center">
+                    <img class="h-8 w-8 rounded-full mr-3" src="${user.profilePic || 'https://ui-avatars.com/api/?name=' + user.name}">
+                    <span class="text-sm font-medium text-gray-900">${user.name}</span>
+                </div>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${user.staffId}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${user.dept}</td>
+            <td class="px-6 py-4 whitespace-nowrap"><span class="px-2 py-1 text-xs rounded-full ${user.profileCompleted ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}">${user.profileCompleted ? 'Locked' : 'Incomplete'}</span></td>
+            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                <button onclick="adminToggleProfileLock(${user.id})" class="text-ecgBlue hover:underline">${user.profileCompleted ? 'Unlock Profile' : 'Lock Profile'}</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function updateRequestStatus(reqId, status, reason = '') {
+    const idx = medicalRequests.findIndex(r => r.id === reqId);
+    if (idx !== -1) {
+        medicalRequests[idx].status = status;
+        if (reason) medicalRequests[idx].rejectionReason = reason;
+        localStorage.setItem('ecgRequests', JSON.stringify(medicalRequests));
+        setupAdmin();
+    }
+}
+
+function openAdminRejectModal(reqId) {
+    document.getElementById('reject-req-id').value = reqId;
+    document.getElementById('reject-modal').classList.remove('view-hidden');
+}
+
+function closeAdminRejectModal() {
+    document.getElementById('reject-modal').classList.add('view-hidden');
+    document.getElementById('reject-reason').value = '';
+}
+
+function handleAdminReject(e) {
+    e.preventDefault();
+    const reqId = document.getElementById('reject-req-id').value;
+    const reason = document.getElementById('reject-reason').value;
+    updateRequestStatus(reqId, 'Rejected', reason);
+    closeAdminRejectModal();
+}
+
+function adminToggleProfileLock(userId) {
+    const userIdx = users.findIndex(u => u.id === userId);
+    if (userIdx !== -1) {
+        users[userIdx].profileCompleted = !users[userIdx].profileCompleted;
+        localStorage.setItem('ecgUsers', JSON.stringify(users));
+        renderAdminUsers();
+        alert(`Profile for ${users[userIdx].name} has been ${users[userIdx].profileCompleted ? 'Locked' : 'Unlocked'}.`);
+    }
 }
 
 function toggleMobileMenu() {
@@ -110,6 +232,14 @@ function handleLogin(e) {
 
     const staffId = document.getElementById('login-id').value;
     const pwd = document.getElementById('login-pwd').value;
+
+    // Admin Hardcoded Check
+    if (staffId === 'ADMIN001' && pwd === 'admin123') {
+        const adminUser = { name: 'Admin User', staffId: 'ADMIN001', isAdmin: true };
+        sessionStorage.setItem('ecgCurrentUser', JSON.stringify(adminUser));
+        window.location.href = 'admin.html';
+        return;
+    }
 
     const user = users.find(u => u.staffId === staffId && u.pwd === pwd);
     if (!user) {
