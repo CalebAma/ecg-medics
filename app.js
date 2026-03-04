@@ -712,3 +712,101 @@ function handleProfileSave(e) {
         window.location.href = 'dashboard.html';
     }
 }
+
+// Data Export & Reporting Functions
+function exportToCSV() {
+    if (medicalRequests.length === 0) {
+        alert('No data available to export.');
+        return;
+    }
+
+    const headers = ['Request ID', 'Staff Name', 'Staff ID', 'Patient Name', 'Patient Type', 'Hospital', 'Target Date', 'Status', 'Timestamp'];
+    const rows = medicalRequests.map(req => {
+        const staff = users.find(u => u.id === req.userId);
+        return [
+            req.id,
+            staff ? staff.name : 'Unknown',
+            staff ? staff.staffId : 'N/A',
+            req.dependantName,
+            req.dependantType,
+            req.hospital,
+            req.targetDate,
+            req.status,
+            new Date(req.timestamp).toLocaleString()
+        ];
+    });
+
+    let csvContent = "data:text/csv;charset=utf-8,"
+        + headers.join(",") + "\n"
+        + rows.map(e => e.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `ECG_Medical_Requests_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function generatePDFReport() {
+    if (typeof jspdf === 'undefined') {
+        alert('PDF library not loaded. Please ensure you are connected to the internet.');
+        return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const today = new Date().toLocaleDateString();
+
+    // Add Branding
+    doc.setFillColor(11, 59, 96); // ecgBlue
+    doc.rect(0, 0, 210, 40, 'F');
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22);
+    doc.setFont("helvetica", "bold");
+    doc.text("ECG Medical Portal", 15, 25);
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text("Administrative Summary Report", 15, 32);
+    doc.text(`Generated on: ${today}`, 160, 32);
+
+    // Stats Section
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(14);
+    doc.text("System Overview", 15, 55);
+
+    doc.setFontSize(10);
+    const total = medicalRequests.length;
+    const approved = medicalRequests.filter(r => r.status === 'Approved').length;
+    const pending = medicalRequests.filter(r => r.status === 'Pending').length;
+    const rejected = medicalRequests.filter(r => r.status === 'Rejected').length;
+
+    doc.text(`Total Staff Members: ${users.length}`, 15, 65);
+    doc.text(`Total Medical Requests: ${total}`, 15, 72);
+    doc.text(`Approved: ${approved} | Pending: ${pending} | Rejected: ${rejected}`, 15, 79);
+
+    // Table
+    const tableData = medicalRequests.map(req => {
+        const staff = users.find(u => u.id === req.userId);
+        return [
+            new Date(req.timestamp).toLocaleDateString(),
+            staff ? staff.staffId : 'N/A',
+            req.dependantName,
+            req.hospital,
+            req.status
+        ];
+    });
+
+    doc.autoTable({
+        startY: 90,
+        head: [['Date', 'Staff ID', 'Patient', 'Hospital', 'Status']],
+        body: tableData,
+        headStyles: { fillStyle: [11, 59, 96], textColor: [255, 255, 255] },
+        alternateRowStyles: { fillColor: [245, 247, 250] },
+    });
+
+    doc.save(`ECG_System_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+}
