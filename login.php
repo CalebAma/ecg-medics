@@ -1,33 +1,25 @@
 <?php
 // =============================================
-//   ECG Medical Portal - Login
+//   ECG Medical Portal - Staff Login
 //   File: login.php
+//   Method: POST
+//   Fields: staff_id, password
 // =============================================
 session_start();
-error_reporting(0);
-ini_set('display_errors', 0);
-ob_start();
-
 require_once 'db_connect.php';
-
-// Helper: clear buffer and send JSON
-function send_json($data)
-{
-    ob_end_clean();
-    header('Content-Type: application/json');
-    echo json_encode($data);
-    exit;
-}
+header('Content-Type: application/json');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    send_json(['success' => false, 'message' => 'Invalid request method.']);
+    echo json_encode(['success' => false, 'message' => 'Invalid request.']);
+    exit;
 }
 
 $staff_id = trim($_POST['staff_id'] ?? '');
 $password = trim($_POST['password'] ?? '');
 
 if (!$staff_id || !$password) {
-    send_json(['success' => false, 'message' => 'Please enter your Staff ID and Password.']);
+    echo json_encode(['success' => false, 'message' => 'Please enter your Staff ID and Password.']);
+    exit;
 }
 
 try {
@@ -39,10 +31,11 @@ try {
         $_SESSION['user_id'] = $user['id'];
         $_SESSION['role'] = $user['role'];
 
+        // Decode JSON fields
         $spouse = $user['spouse'] ? json_decode($user['spouse'], true) : null;
         $children = $user['children'] ? json_decode($user['children'], true) : [];
 
-        send_json([
+        echo json_encode([
             'success' => true,
             'user' => [
                 'id' => $user['id'],
@@ -51,6 +44,7 @@ try {
                 'email' => $user['email'],
                 'dept' => $user['dept'],
                 'phone' => $user['phone'],
+                'dob' => $user['dob'],
                 'role' => (int) $user['role'],
                 'profileCompleted' => (bool) $user['profile_completed'],
                 'profilePic' => $user['profile_pic'],
@@ -58,14 +52,16 @@ try {
                 'region' => $user['region'],
                 'district' => $user['district'],
                 'spouse' => $spouse,
+                'spousePic' => $user['spouse_pic'],
+                'spouse_id_url' => $user['spouse_id_url'],
                 'children' => $children,
                 'isAdmin' => (int) $user['role'] >= 1,
             ]
         ]);
     } else {
-        send_json(['success' => false, 'message' => 'Invalid Staff ID or Password.']);
+        echo json_encode(['success' => false, 'message' => 'Invalid Staff ID or Password.']);
     }
 } catch (PDOException $e) {
-    send_json(['success' => false, 'message' => 'Server error: ' . $e->getMessage()]);
+    echo json_encode(['success' => false, 'message' => 'Server error: ' . $e->getMessage()]);
 }
 ?>

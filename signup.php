@@ -1,25 +1,17 @@
 <?php
 // =============================================
-//   ECG Medical Portal - Signup
+//   ECG Medical Portal - Staff Signup
 //   File: signup.php
+//   Method: POST
+//   Fields: name, staff_id, email, password, dept, phone
 // =============================================
 session_start();
-error_reporting(0);
-ini_set('display_errors', 0);
-ob_start();
-
 require_once 'db_connect.php';
-
-function send_json($data)
-{
-    ob_end_clean();
-    header('Content-Type: application/json');
-    echo json_encode($data);
-    exit;
-}
+header('Content-Type: application/json');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    send_json(['success' => false, 'message' => 'Invalid request method.']);
+    echo json_encode(['success' => false, 'message' => 'Invalid request.']);
+    exit;
 }
 
 $name = trim($_POST['name'] ?? '');
@@ -30,43 +22,51 @@ $dept = trim($_POST['dept'] ?? '');
 $phone = trim($_POST['phone'] ?? '');
 
 if (!$name || !$staff_id || !$email || !$password || !$dept) {
-    send_json(['success' => false, 'message' => 'Please fill in all required fields.']);
+    echo json_encode(['success' => false, 'message' => 'Please fill in all required fields.']);
+    exit;
 }
 
 $password_hash = password_hash($password, PASSWORD_DEFAULT);
-$role = ($dept === 'IT') ? 2 : 0;
+$role = ($dept === 'IT') ? 2 : 0; // 2 = Super Admin, 1 = Manager, 0 = Staff
 
 try {
     $stmt = $pdo->prepare(
         "INSERT INTO users (staff_id, full_name, email, password_hash, dept, phone, role) VALUES (?, ?, ?, ?, ?, ?, ?)"
     );
     $stmt->execute([$staff_id, $name, $email, $password_hash, $dept, $phone, $role]);
-    $user_id = $pdo->lastInsertId();
 
+    $user_id = $pdo->lastInsertId();
     $_SESSION['user_id'] = $user_id;
     $_SESSION['role'] = $role;
 
-    send_json([
+    echo json_encode([
         'success' => true,
         'user' => [
             'id' => $user_id,
             'staffId' => $staff_id,
             'name' => $name,
             'email' => $email,
+            'dob' => null,
             'dept' => $dept,
             'phone' => $phone,
             'role' => $role,
             'profileCompleted' => false,
             'profilePic' => null,
+            'designation' => null,
+            'region' => null,
+            'district' => null,
             'spouse' => null,
+            'spousePic' => null,
+            'spouse_id_url' => null,
             'children' => [],
             'isAdmin' => $role >= 1,
         ]
     ]);
 } catch (PDOException $e) {
     if ($e->getCode() == 23000) {
-        send_json(['success' => false, 'message' => 'A staff member with this ID or Email already exists.']);
+        echo json_encode(['success' => false, 'message' => 'A staff member with this ID or Email already exists.']);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Registration failed: ' . $e->getMessage()]);
     }
-    send_json(['success' => false, 'message' => 'Registration failed: ' . $e->getMessage()]);
 }
 ?>

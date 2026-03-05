@@ -1,36 +1,24 @@
 <?php
 // =============================================
-//   ECG Medical Portal - Fetch All Data
+//   ECG Medical Portal - Fetch All App Data
 //   File: get_data.php
+//   Method: GET (called on page load)
+//   Returns: users, requests, audit_logs
 // =============================================
 session_start();
-error_reporting(0);
-ini_set('display_errors', 0);
-ob_start();
-
 require_once 'db_connect.php';
+header('Content-Type: application/json');
 
-function send_json($data)
-{
-    ob_end_clean();
-    header('Content-Type: application/json');
-    echo json_encode($data);
+if (!isset($_SESSION['user_id'])) {
+    echo json_encode(['success' => false, 'message' => 'Not authenticated.']);
     exit;
 }
 
-if (!isset($_SESSION['user_id'])) {
-    send_json(['success' => false, 'message' => 'Not authenticated.']);
-}
-
 try {
-    // Fetch all users
-    $users = $pdo->query(
-        "SELECT id, staff_id, full_name, email, dept, phone, role, profile_completed,
-                profile_pic, designation, region, district, spouse, children,
-                spouse_pic, spouse_id_url, created_at
-         FROM users ORDER BY created_at DESC"
-    )->fetchAll();
+    // Fetch all users/profiles
+    $users = $pdo->query("SELECT id, staff_id, full_name, email, dob, dept, phone, role, profile_completed, profile_pic, designation, region, district, spouse, children, spouse_pic, spouse_id_url, created_at FROM users ORDER BY created_at DESC")->fetchAll();
 
+    // Normalize field names so the JS app treats them the same as before
     $users = array_map(function ($u) {
         $u['staffId'] = $u['staff_id'];
         $u['name'] = $u['full_name'];
@@ -44,11 +32,8 @@ try {
         return $u;
     }, $users);
 
-    // Fetch all requests
-    $requests = $pdo->query(
-        "SELECT * FROM medical_requests ORDER BY timestamp DESC"
-    )->fetchAll();
-
+    // Fetch all medical requests
+    $requests = $pdo->query("SELECT * FROM medical_requests ORDER BY timestamp DESC")->fetchAll();
     $requests = array_map(function ($r) {
         $r['userId'] = $r['user_id'];
         $r['targetDate'] = $r['request_date'];
@@ -57,12 +42,10 @@ try {
         return $r;
     }, $requests);
 
-    // Fetch audit logs (last 100)
-    $logs = $pdo->query(
-        "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100"
-    )->fetchAll();
+    // Fetch audit logs
+    $logs = $pdo->query("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100")->fetchAll();
 
-    send_json([
+    echo json_encode([
         'success' => true,
         'users' => $users,
         'requests' => $requests,
@@ -70,6 +53,6 @@ try {
     ]);
 
 } catch (PDOException $e) {
-    send_json(['success' => false, 'message' => 'Data fetch failed: ' . $e->getMessage()]);
+    echo json_encode(['success' => false, 'message' => 'Data fetch failed: ' . $e->getMessage()]);
 }
 ?>
