@@ -1,17 +1,25 @@
 <?php
 // =============================================
-//   ECG Medical Portal - Staff Signup
+//   ECG Medical Portal - Signup
 //   File: signup.php
-//   Method: POST
-//   Fields: name, staff_id, email, password, dept, phone
 // =============================================
 session_start();
+error_reporting(0);
+ini_set('display_errors', 0);
+ob_start();
+
 require_once 'db_connect.php';
-header('Content-Type: application/json');
+
+function send_json($data)
+{
+    ob_end_clean();
+    header('Content-Type: application/json');
+    echo json_encode($data);
+    exit;
+}
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid request.']);
-    exit;
+    send_json(['success' => false, 'message' => 'Invalid request method.']);
 }
 
 $name = trim($_POST['name'] ?? '');
@@ -22,24 +30,23 @@ $dept = trim($_POST['dept'] ?? '');
 $phone = trim($_POST['phone'] ?? '');
 
 if (!$name || !$staff_id || !$email || !$password || !$dept) {
-    echo json_encode(['success' => false, 'message' => 'Please fill in all required fields.']);
-    exit;
+    send_json(['success' => false, 'message' => 'Please fill in all required fields.']);
 }
 
 $password_hash = password_hash($password, PASSWORD_DEFAULT);
-$role = ($dept === 'IT') ? 2 : 0; // 2 = Super Admin, 1 = Manager, 0 = Staff
+$role = ($dept === 'IT') ? 2 : 0;
 
 try {
     $stmt = $pdo->prepare(
         "INSERT INTO users (staff_id, full_name, email, password_hash, dept, phone, role) VALUES (?, ?, ?, ?, ?, ?, ?)"
     );
     $stmt->execute([$staff_id, $name, $email, $password_hash, $dept, $phone, $role]);
-
     $user_id = $pdo->lastInsertId();
+
     $_SESSION['user_id'] = $user_id;
     $_SESSION['role'] = $role;
 
-    echo json_encode([
+    send_json([
         'success' => true,
         'user' => [
             'id' => $user_id,
@@ -58,9 +65,8 @@ try {
     ]);
 } catch (PDOException $e) {
     if ($e->getCode() == 23000) {
-        echo json_encode(['success' => false, 'message' => 'A staff member with this ID or Email already exists.']);
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Registration failed: ' . $e->getMessage()]);
+        send_json(['success' => false, 'message' => 'A staff member with this ID or Email already exists.']);
     }
+    send_json(['success' => false, 'message' => 'Registration failed: ' . $e->getMessage()]);
 }
 ?>

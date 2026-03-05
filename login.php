@@ -1,25 +1,33 @@
 <?php
 // =============================================
-//   ECG Medical Portal - Staff Login
+//   ECG Medical Portal - Login
 //   File: login.php
-//   Method: POST
-//   Fields: staff_id, password
 // =============================================
 session_start();
+error_reporting(0);
+ini_set('display_errors', 0);
+ob_start();
+
 require_once 'db_connect.php';
-header('Content-Type: application/json');
+
+// Helper: clear buffer and send JSON
+function send_json($data)
+{
+    ob_end_clean();
+    header('Content-Type: application/json');
+    echo json_encode($data);
+    exit;
+}
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid request.']);
-    exit;
+    send_json(['success' => false, 'message' => 'Invalid request method.']);
 }
 
 $staff_id = trim($_POST['staff_id'] ?? '');
 $password = trim($_POST['password'] ?? '');
 
 if (!$staff_id || !$password) {
-    echo json_encode(['success' => false, 'message' => 'Please enter your Staff ID and Password.']);
-    exit;
+    send_json(['success' => false, 'message' => 'Please enter your Staff ID and Password.']);
 }
 
 try {
@@ -31,11 +39,10 @@ try {
         $_SESSION['user_id'] = $user['id'];
         $_SESSION['role'] = $user['role'];
 
-        // Decode JSON fields
         $spouse = $user['spouse'] ? json_decode($user['spouse'], true) : null;
         $children = $user['children'] ? json_decode($user['children'], true) : [];
 
-        echo json_encode([
+        send_json([
             'success' => true,
             'user' => [
                 'id' => $user['id'],
@@ -56,9 +63,9 @@ try {
             ]
         ]);
     } else {
-        echo json_encode(['success' => false, 'message' => 'Invalid Staff ID or Password.']);
+        send_json(['success' => false, 'message' => 'Invalid Staff ID or Password.']);
     }
 } catch (PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'Server error: ' . $e->getMessage()]);
+    send_json(['success' => false, 'message' => 'Server error: ' . $e->getMessage()]);
 }
 ?>

@@ -2,15 +2,24 @@
 // =============================================
 //   ECG Medical Portal - Submit Medical Request
 //   File: submit_request.php
-//   Method: POST
 // =============================================
 session_start();
+error_reporting(0);
+ini_set('display_errors', 0);
+ob_start();
+
 require_once 'db_connect.php';
-header('Content-Type: application/json');
+
+function send_json($data)
+{
+    ob_end_clean();
+    header('Content-Type: application/json');
+    echo json_encode($data);
+    exit;
+}
 
 if (!isset($_SESSION['user_id'])) {
-    echo json_encode(['success' => false, 'message' => 'Not authenticated.']);
-    exit;
+    send_json(['success' => false, 'message' => 'Not authenticated.']);
 }
 
 $user_id = $_SESSION['user_id'];
@@ -21,18 +30,16 @@ $patient_type = trim($_POST['patient_type'] ?? '');
 $patient_name = trim($_POST['patient_name'] ?? '');
 
 if (!$purpose || !$hospital || !$request_date || !$patient_name) {
-    echo json_encode(['success' => false, 'message' => 'Please fill in all required fields.']);
-    exit;
+    send_json(['success' => false, 'message' => 'Please fill in all required fields.']);
 }
 
-// Validate date range (not in the past, not more than 30 days ahead)
+// Validate date range
 $today = new DateTime('today');
 $max_date = (new DateTime('today'))->modify('+30 days');
 $req_date = new DateTime($request_date);
 
 if ($req_date < $today || $req_date > $max_date) {
-    echo json_encode(['success' => false, 'message' => 'Date must be between today and 30 days from now.']);
-    exit;
+    send_json(['success' => false, 'message' => 'Date must be between today and 30 days from now.']);
 }
 
 try {
@@ -41,15 +48,15 @@ try {
          VALUES (?, ?, ?, ?, ?, ?, 'Pending')"
     );
     $stmt->execute([$user_id, $purpose, $hospital, $request_date, $patient_type, $patient_name]);
-
     $new_id = $pdo->lastInsertId();
 
-    echo json_encode([
+    send_json([
         'success' => true,
         'id' => $new_id,
-        'message' => "Medical Request Submitted! Request ID: REQ-{$new_id}"
+        'message' => "Request submitted successfully. ID: REQ-{$new_id}"
     ]);
+
 } catch (PDOException $e) {
-    echo json_encode(['success' => false, 'message' => 'Submission failed: ' . $e->getMessage()]);
+    send_json(['success' => false, 'message' => 'Submission failed: ' . $e->getMessage()]);
 }
 ?>
