@@ -613,31 +613,9 @@ function handleForgotPassword(e) {
 
 function handleResetPassword(e) {
     e.preventDefault();
-    const errorDiv = document.getElementById('reset-error');
-    errorDiv.classList.add('hidden');
-
-    const newPwd = document.getElementById('new-pwd').value;
-    const confirmNewPwd = document.getElementById('confirm-new-pwd').value;
-
-    if (!validatePassword(newPwd)) {
-        showError(errorDiv, 'Password must be at least 8 characters, contain 1 uppercase letter and 1 number.');
-        return;
-    }
-
-    if (newPwd !== confirmNewPwd) {
-        showError(errorDiv, 'Passwords do not match.');
-        return;
-    }
-
-    const userIdx = users.findIndex(u => u.id === resetUserId);
-    if (userIdx !== -1) {
-        users[userIdx].pwd = newPwd;
-        localStorage.setItem('ecgUsers', JSON.stringify(users));
-
-        alert('Password Updated Successfully! Please login with your new password.');
-        toggleAuthForm('login');
-        resetUserId = null;
-    }
+    alert('For security reasons, please contact the IT Administrator to reset your password. Password resets require manual verification.');
+    toggleAuthForm('login');
+    resetUserId = null;
 }
 
 function showError(el, msg) {
@@ -1090,43 +1068,12 @@ async function renderHistory() {
 
     let userRequests = [];
 
-    if (typeof supabase !== 'undefined') {
-        try {
-            let query = supabase.from('medical_requests').select('*').eq('user_id', currentUser.id);
-            if (filter !== 'All') {
-                query = query.eq('status', filter);
-            }
-            const { data, error } = await query.order('created_at', { ascending: false }); // Assuming 'created_at' for timestamp
-            if (error) throw error;
-            userRequests = data.map(req => ({
-                id: req.id,
-                userId: req.user_id,
-                timestamp: req.created_at,
-                purpose: req.purpose,
-                hospital: req.hospital,
-                targetDate: req.request_date,
-                dependantName: req.dependant_name,
-                dependantType: req.patient_type,
-                status: req.status,
-                rejectionReason: req.rejection_reason
-            }));
-        } catch (error) {
-            console.error('Error fetching medical requests from Supabase:', error);
-            // Fallback to localStorage if Supabase fails
-            userRequests = medicalRequests.filter(r => r.userId === currentUser.id);
-            if (filter !== 'All') {
-                userRequests = userRequests.filter(r => r.status === filter);
-            }
-            userRequests.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        }
-    } else {
-        // Fallback to localStorage
-        userRequests = medicalRequests.filter(r => r.userId === currentUser.id);
-        if (filter !== 'All') {
-            userRequests = userRequests.filter(r => r.status === filter);
-        }
-        userRequests.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    // Use local array fetched from PHP backend
+    userRequests = medicalRequests.filter(r => r.userId == currentUser.id);
+    if (filter !== 'All') {
+        userRequests = userRequests.filter(r => r.status === filter);
     }
+    userRequests.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
     if (userRequests.length === 0) {
         emptyDiv.classList.remove('view-hidden');
@@ -1163,40 +1110,7 @@ async function renderHistory() {
 }
 
 async function viewDetails(reqId) {
-    let req = medicalRequests.find(r => r.id === reqId);
-    if (!req) {
-        // Try fetching from Supabase if not found locally
-        if (typeof supabase !== 'undefined') {
-            try {
-                const { data, error } = await supabase.from('medical_requests').select('*').eq('id', reqId).single();
-                if (error && error.code !== 'PGRST116') throw error;
-                if (data) {
-                    req = {
-                        id: data.id,
-                        userId: data.user_id,
-                        timestamp: data.created_at,
-                        purpose: data.purpose,
-                        hospital: data.hospital,
-                        targetDate: data.request_date,
-                        dependantName: data.dependant_name,
-                        dependantType: data.patient_type,
-                        status: data.status,
-                        rejectionReason: data.rejection_reason
-                    };
-                    // Add to local cache if not present
-                    const existingIdx = medicalRequests.findIndex(r => r.id === req.id);
-                    if (existingIdx === -1) {
-                        medicalRequests.push(req);
-                    } else {
-                        medicalRequests[existingIdx] = req;
-                    }
-                }
-            } catch (error) {
-                console.error('Error fetching request from Supabase:', error);
-            }
-        }
-    }
-
+    let req = medicalRequests.find(r => r.id == reqId);
     if (!req) return;
 
     const staff = users.find(u => u.id === req.userId);
@@ -1484,31 +1398,7 @@ async function handleProfileSave(e) {
 
 // Data Export & Reporting Functions
 async function exportToCSV() {
-    let requestsToExport = [];
-
-    if (typeof supabase !== 'undefined') {
-        try {
-            const { data, error } = await supabase.from('medical_requests').select('*');
-            if (error) throw error;
-            requestsToExport = data.map(req => ({
-                id: req.id,
-                userId: req.user_id,
-                timestamp: req.created_at,
-                purpose: req.purpose,
-                hospital: req.hospital,
-                targetDate: req.request_date,
-                dependantName: req.dependant_name,
-                dependantType: req.patient_type,
-                status: req.status
-            }));
-        } catch (error) {
-            console.error('Error fetching medical requests for export from Supabase:', error);
-            alert('Failed to fetch data for export. Using local data if available.');
-            requestsToExport = medicalRequests; // Fallback
-        }
-    } else {
-        requestsToExport = medicalRequests;
-    }
+    let requestsToExport = medicalRequests;
 
     if (requestsToExport.length === 0) {
         alert('No data available to export.');
