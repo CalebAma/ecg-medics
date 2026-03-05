@@ -1,46 +1,66 @@
-let currentUser = null;
-let users = JSON.parse(localStorage.getItem('ecgUsers')) || [];
-let medicalRequests = JSON.parse(localStorage.getItem('ecgRequests')) || [];
-let auditLogs = JSON.parse(localStorage.getItem('ecgAuditLogs')) || [];
+// =============================================
+//  PHP Backend Configuration
+//  All data comes from the MySQL database
+//  via PHP API files.
+// =============================================
+const API_BASE = ''; // Same directory as HTML files
 
-function addAuditLog(action, type, details) {
-    const log = {
-        id: Date.now(),
-        timestamp: new Date().toISOString(),
-        adminName: currentUser.name,
-        action,
-        type,
-        details
-    };
-    auditLogs.unshift(log); // Add to beginning
-    if (auditLogs.length > 50) auditLogs.pop(); // Keep only last 50
-    localStorage.setItem('ecgAuditLogs', JSON.stringify(auditLogs));
+let currentUser = null;
+let pageId = null;
+let users = [];
+let medicalRequests = [];
+let auditLogs = [];
+
+// Central POST helper - sends FormData to any PHP endpoint
+async function apiPost(endpoint, data = {}) {
+    const form = new FormData();
+    for (const key in data) {
+        form.append(key, data[key]);
+    }
+    const res = await fetch(API_BASE + endpoint, { method: 'POST', body: form });
+    return await res.json();
+}
+
+// Fetch all portal data from get_data.php
+async function refreshData() {
+    try {
+        const res = await fetch(API_BASE + 'get_data.php');
+        const data = await res.json();
+        if (!data.success) { console.warn('Could not load data:', data.message); return; }
+        users = data.users || [];
+        medicalRequests = data.requests || [];
+        auditLogs = data.logs || [];
+    } catch (e) {
+        console.error('Error fetching data from server:', e);
+    }
+}
+
+async function addAuditLog(action, type, details) {
+    try {
+        await apiPost('admin_action.php', {
+            action: 'add_log',
+            log_action: action,
+            target_type: type,
+            details: details,
+            admin_name: currentUser ? currentUser.name : 'System'
+        });
+        // Also update local array immediately for UI
+        auditLogs.unshift({
+            id: Date.now(),
+            action, target_type: type, details,
+            admin_name: currentUser ? currentUser.name : 'System',
+            created_at: new Date().toISOString()
+        });
+    } catch (e) {
+        console.warn('Could not write audit log:', e);
+    }
 }
 
 // DOM Loaded Initialization
-// Cross-Window Synchronization
-window.addEventListener('storage', (e) => {
-    if (e.key === 'ecgUsers' || e.key === 'ecgRequests') {
-        users = JSON.parse(localStorage.getItem('ecgUsers')) || [];
-        medicalRequests = JSON.parse(localStorage.getItem('ecgRequests')) || [];
-
-        // Refresh UI if on specific pages
-        const pageId = document.body.id;
-        if (pageId === 'page-admin' && typeof setupAdmin === 'function') {
-            setupAdmin();
-        }
-        if (pageId === 'page-dashboard' && typeof updateDashboard === 'function') {
-            updateDashboard();
-        }
-        if (pageId === 'page-history' && typeof renderHistory === 'function') {
-            renderHistory();
-        }
-    }
-});
-
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    await refreshData();
     const sessionUser = sessionStorage.getItem('ecgCurrentUser');
-    const pageId = document.body.id;
+    pageId = document.body.id;
 
     if (sessionUser) {
         const storedUser = JSON.parse(sessionUser);
@@ -82,6 +102,10 @@ const ROLES = {
     MANAGER: 1,
     SUPER_ADMIN: 2
 };
+
+// File uploads are now handled server-side by save_profile.php
+// The uploadFile function is no longer needed.
+
 
 function initPage(pageId) {
     if (pageId !== 'page-profile' && pageId !== 'page-auth' && !currentUser.profileCompleted) {
@@ -254,14 +278,14 @@ function renderAdminUsers(filtered = null) {
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${user.dept}</td>
             <td class="px-6 py-4 whitespace-nowrap"><span class="px-2 py-1 text-xs rounded-full font-bold ${user.profileCompleted ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}">${user.profileCompleted ? 'Locked' : 'Incomplete'}</span></td>
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
-                <button onclick="adminViewUser(${user.id})" class="text-ecgBlue hover:bg-blue-50 px-2 py-1 rounded font-bold transition-colors">
+                <button onclick="adminViewUser('${user.id}')" class="text-ecgBlue hover:bg-blue-50 px-2 py-1 rounded font-bold transition-colors">
                     View
                 </button>
-                <button onclick="adminToggleProfileLock(${user.id})" class="text-gray-600 hover:text-ecgBlue font-bold transition-colors">
+                <button onclick="adminToggleProfileLock('${user.id}')" class="text-gray-600 hover:text-ecgBlue font-bold transition-colors">
                     ${user.profileCompleted ? 'Unlock' : 'Lock'}
                 </button>
                 ${isSuperAdmin ? `
-                <button onclick="adminDeleteUser(${user.id})" class="text-red-600 hover:text-red-800 transition-colors p-1.5 rounded-lg hover:bg-red-50 group" title="Delete User">
+                <button onclick="adminDeleteUser('${user.id}')" class="text-red-600 hover:text-red-800 transition-colors p-1.5 rounded-lg hover:bg-red-50 group" title="Delete User">
                     <svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                     </svg>
@@ -273,19 +297,34 @@ function renderAdminUsers(filtered = null) {
     });
 }
 
-function updateRequestStatus(reqId, status, reason = '') {
-    const idx = medicalRequests.findIndex(r => r.id === reqId);
-    if (idx !== -1) {
-        const req = medicalRequests[idx];
-        const staff = users.find(u => u.id === req.userId);
-        req.status = status;
-        if (reason) req.rejectionReason = reason;
-        localStorage.setItem('ecgRequests', JSON.stringify(medicalRequests));
+async function updateRequestStatus(reqId, status, reason = '') {
+    try {
+        const data = await apiPost('admin_action.php', {
+            action: 'update_status',
+            req_id: reqId,
+            status,
+            reason
+        });
+        if (!data.success) throw new Error(data.message);
 
-        addAuditLog(status === 'Approved' ? 'Approved Request' : 'Rejected Request', 'Medical Request',
-            `${status} request #${reqId} for ${staff ? staff.name : 'Unknown'}${reason ? '. Reason: ' + reason : ''}`);
+        // Update local state for immediate UI refresh
+        const idx = medicalRequests.findIndex(r => r.id == reqId);
+        if (idx !== -1) {
+            medicalRequests[idx].status = status;
+            if (reason) medicalRequests[idx].rejectionReason = reason;
+        }
 
+        const req = medicalRequests.find(r => r.id == reqId);
+        const staff = users.find(u => u.id == req?.userId);
+        await addAuditLog(
+            status === 'Approved' ? 'Approved Request' : 'Rejected Request',
+            'Medical Request',
+            `${status} request #${reqId} for ${staff ? staff.name : 'Unknown'}${reason ? '. Reason: ' + reason : ''}`
+        );
         setupAdmin();
+    } catch (error) {
+        console.error('Update Status Error:', error);
+        alert('Failed to update request status: ' + error.message);
     }
 }
 
@@ -307,41 +346,57 @@ function handleAdminReject(e) {
     closeAdminRejectModal();
 }
 
-function adminToggleProfileLock(userId) {
-    const userIdx = users.findIndex(u => u.id === userId);
-    if (userIdx !== -1) {
-        const user = users[userIdx];
-        user.profileCompleted = !user.profileCompleted;
-        localStorage.setItem('ecgUsers', JSON.stringify(users));
+async function adminToggleProfileLock(userId) {
+    const userIdx = users.findIndex(u => u.id == userId);
+    if (userIdx === -1) return;
+    const user = users[userIdx];
+    const newStatus = user.profileCompleted ? 0 : 1;
 
-        addAuditLog(user.profileCompleted ? 'Locked Profile' : 'Unlocked Profile', 'Staff Member',
-            `${user.profileCompleted ? 'Locked' : 'Unlocked'} profile for ${user.name} (${user.staffId})`);
+    try {
+        const data = await apiPost('admin_action.php', {
+            action: 'toggle_lock',
+            user_id: userId,
+            new_status: newStatus
+        });
+        if (!data.success) throw new Error(data.message);
 
+        user.profileCompleted = !!newStatus;
+        await addAuditLog(
+            newStatus ? 'Locked Profile' : 'Unlocked Profile',
+            'Staff Member',
+            `${newStatus ? 'Locked' : 'Unlocked'} profile for ${user.name} (${user.staffId})`
+        );
         renderAdminUsers();
-        alert(`Profile for ${users[userIdx].name} has been ${users[userIdx].profileCompleted ? 'Locked' : 'Unlocked'}.`);
+        alert(`Profile for ${user.name} has been ${newStatus ? 'Locked' : 'Unlocked'}.`);
+    } catch (error) {
+        console.error('Lock Toggle Error:', error);
+        alert('Failed to toggle profile lock: ' + error.message);
     }
 }
 
-function adminDeleteUser(userId) {
-    const user = users.find(u => u.id === userId);
+async function adminDeleteUser(userId) {
+    const user = users.find(u => u.id == userId);
     if (!user) return;
 
-    if (confirm(`Are you sure you want to PERMANENTLY delete staff member: ${user.name} (${user.staffId})?\n\nThis will also remove all their associated medical requests. This action cannot be undone.`)) {
-        addAuditLog('Deleted Staff', 'Staff Member', `Permanently deleted ${user.name} (${user.staffId}) and all associated records.`);
+    if (!confirm(`Are you sure you want to PERMANENTLY delete staff member:\n${user.name} (${user.staffId})?\n\nAll their medical requests will also be deleted. This cannot be undone.`)) return;
 
-        // Remove user from users array
-        const updatedUsers = users.filter(u => u.id !== userId);
-        users = updatedUsers;
-        localStorage.setItem('ecgUsers', JSON.stringify(users));
+    try {
+        const data = await apiPost('admin_action.php', {
+            action: 'delete_user',
+            user_id: userId
+        });
+        if (!data.success) throw new Error(data.message);
 
-        // Remove associated medical requests
-        const updatedRequests = medicalRequests.filter(r => r.userId !== userId);
-        medicalRequests = updatedRequests;
-        localStorage.setItem('ecgRequests', JSON.stringify(medicalRequests));
+        await addAuditLog('Deleted Staff', 'Staff Member',
+            `Permanently deleted ${user.name} (${user.staffId}) and all associated records.`);
 
-        // Update UI
+        users = users.filter(u => u.id != userId);
+        medicalRequests = medicalRequests.filter(r => r.userId != userId);
         setupAdmin();
-        alert(`Staff member ${user.name} and all their requests have been deleted successfully.`);
+        alert(`Staff member ${user.name} has been permanently removed.`);
+    } catch (error) {
+        console.error('Delete User Error:', error);
+        alert('Failed to delete user: ' + error.message);
     }
 }
 
@@ -383,28 +438,43 @@ function updateNavbarUser() {
         roleClass = 'bg-ecgYellow/20 text-ecgYellow border-ecgYellow/30';
     }
 
+    const firstName = currentUser.name.split(' ')[0];
+
     userInfo.innerHTML = `
-        <div class="flex items-center space-x-3 bg-white/5 px-3 py-1.5 rounded-xl border border-white/10 backdrop-blur-sm mr-4">
+        < div class="flex items-center space-x-3 bg-white/5 px-3 py-1.5 rounded-xl border border-white/10 backdrop-blur-sm mr-4" >
             <div class="text-right hidden sm:block">
-                <p class="text-xs font-bold text-white tracking-wide">${currentUser.name}</p>
+                <p class="text-xs font-bold text-white tracking-wide">${firstName}</p>
                 <p class="text-[10px] font-medium text-gray-400 uppercase tracking-tighter">${roleName}</p>
             </div>
             <div class="h-8 w-8 rounded-lg overflow-hidden border border-white/20 shadow-inner">
                 <img src="${currentUser.profilePic || 'https://ui-avatars.com/api/?name=' + currentUser.name + '&background=f3b204&color=0b3b60'}" class="h-full w-full object-cover">
             </div>
-        </div>
-    `;
+        </div >
+        `;
 }
 
 // Authentication Forms Toggle
 function toggleAuthForm(type) {
-    if (type === 'login') {
-        document.getElementById('login-form').classList.remove('view-hidden');
-        document.getElementById('signup-form').classList.add('view-hidden');
-    } else {
-        document.getElementById('login-form').classList.add('view-hidden');
-        document.getElementById('signup-form').classList.remove('view-hidden');
-    }
+    const loginForm = document.getElementById('login-form');
+    const signupForm = document.getElementById('signup-form');
+    const forgotForm = document.getElementById('forgot-form');
+    const resetForm = document.getElementById('reset-form');
+
+    if (!loginForm || !signupForm) return;
+
+    [loginForm, signupForm, forgotForm, resetForm].forEach(f => {
+        if (f) f.classList.add('view-hidden');
+    });
+
+    if (type === 'login') loginForm.classList.remove('view-hidden');
+    else if (type === 'signup') signupForm.classList.remove('view-hidden');
+    else if (type === 'forgot') forgotForm.classList.remove('view-hidden');
+    else if (type === 'reset') resetForm.classList.remove('view-hidden');
+}
+
+function showSuccess(el, msg) {
+    el.textContent = msg;
+    el.classList.remove('hidden');
 }
 
 // Validation Helpers
@@ -412,8 +482,13 @@ const validatePassword = (pwd) => /^(?=.*[A-Z])(?=.*\d).{8,}$/.test(pwd);
 const validateEcgEmail = (email) => email.toLowerCase().endsWith('@ecg.com.gh');
 
 // Signup
-function handleSignup(e) {
+async function handleSignup(e) {
     e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Creating Account...';
+
     const errorDiv = document.getElementById('signup-error');
     errorDiv.classList.add('hidden');
     errorDiv.textContent = '';
@@ -428,62 +503,74 @@ function handleSignup(e) {
 
     if (!validateEcgEmail(email)) {
         showError(errorDiv, 'Email must use the ECG domain (@ecg.com.gh).');
-        return;
-    }
-    if (users.some(u => u.staffId === staffId)) {
-        showError(errorDiv, 'Staff ID is already registered.');
-        return;
-    }
-    if (users.some(u => u.email === email)) {
-        showError(errorDiv, 'Email is already registered.');
+        btn.disabled = false; btn.textContent = originalText;
         return;
     }
     if (!validatePassword(pwd)) {
-        showError(errorDiv, 'Password must be at least 8 characters, contain 1 uppercase letter and 1 number.');
+        showError(errorDiv, 'Password must be at least 8 characters with 1 uppercase letter and 1 number.');
+        btn.disabled = false; btn.textContent = originalText;
         return;
     }
     if (pwd !== confirmPwd) {
         showError(errorDiv, 'Passwords do not match.');
+        btn.disabled = false; btn.textContent = originalText;
         return;
     }
 
-    // Default role: 0 (Staff). If IT department, assign SUPER_ADMIN (2).
-    const role = (dept === 'IT') ? ROLES.SUPER_ADMIN : ROLES.STAFF;
-
-    const newUser = { id: Date.now(), name, staffId, dept, email, phone, pwd, role };
-    users.push(newUser);
-    localStorage.setItem('ecgUsers', JSON.stringify(users));
-
-    completeLogin(newUser, true);
+    try {
+        const data = await apiPost('signup.php', {
+            name, staff_id: staffId, email, password: pwd, dept, phone
+        });
+        if (!data.success) throw new Error(data.message);
+        await completeLogin(data.user, true);
+    } catch (error) {
+        console.error('Signup Error:', error);
+        showError(errorDiv, error.message || 'Registration failed. Please try again.');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
 }
 
 // Login
-function handleLogin(e) {
+async function handleLogin(e) {
     e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Verifying...';
+
     const errorDiv = document.getElementById('login-error');
     errorDiv.classList.add('hidden');
 
-    const staffId = document.getElementById('login-id').value;
+    const staffIdInput = document.getElementById('login-id').value.trim();
     const pwd = document.getElementById('login-pwd').value;
 
-    // Admin Hardcoded Check (Super Admin for initial setup)
-    if (staffId === 'ADMIN001' && pwd === 'admin123') {
-        const adminUser = { name: 'Admin User', staffId: 'ADMIN001', role: ROLES.SUPER_ADMIN, isAdmin: true, profileCompleted: true };
-        sessionStorage.setItem('ecgCurrentUser', JSON.stringify(adminUser));
-        window.location.href = 'dashboard.html';
-        return;
+    try {
+        const data = await apiPost('login.php', {
+            staff_id: staffIdInput,
+            password: pwd
+        });
+        if (!data.success) throw new Error(data.message);
+        await completeLogin(data.user);
+    } catch (error) {
+        console.error('Login Error:', error);
+        showError(errorDiv, error.message || 'Invalid Staff ID or Password.');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
     }
-
-    const user = users.find(u => u.staffId === staffId && u.pwd === pwd);
-    if (!user) {
-        showError(errorDiv, 'Invalid Staff ID or Password.');
-        return;
-    }
-    completeLogin(user);
 }
 
-function completeLogin(user, fromSignup = false) {
-    sessionStorage.setItem('ecgCurrentUser', JSON.stringify(user));
+async function completeLogin(user, fromSignup = false) {
+    // PHP already normalizes fields, just store as-is
+    const sessionUser = {
+        ...user,
+        staffId: user.staffId || user.staff_id,
+        profileCompleted: user.profileCompleted ?? user.profile_completed ?? false,
+        isAdmin: user.isAdmin || (user.role >= 1)
+    };
+    sessionStorage.setItem('ecgCurrentUser', JSON.stringify(sessionUser));
     if (fromSignup) {
         window.location.href = 'profile.html';
     } else {
@@ -491,9 +578,66 @@ function completeLogin(user, fromSignup = false) {
     }
 }
 
-function logoutUser() {
+async function logoutUser() {
+    try { await fetch('logout.php'); } catch (e) { }
     sessionStorage.removeItem('ecgCurrentUser');
     window.location.href = 'index.html';
+}
+
+let resetUserId = null;
+
+function handleForgotPassword(e) {
+    e.preventDefault();
+    const errorDiv = document.getElementById('forgot-error');
+    const successDiv = document.getElementById('forgot-success');
+    errorDiv.classList.add('hidden');
+    successDiv.classList.add('hidden');
+
+    const staffId = document.getElementById('forgot-id').value;
+    const email = document.getElementById('forgot-email').value;
+
+    const user = users.find(u => u.staffId === staffId && u.email.toLowerCase() === email.toLowerCase());
+
+    if (!user) {
+        showError(errorDiv, 'No account found with these details.');
+        return;
+    }
+
+    resetUserId = user.id;
+    showSuccess(successDiv, 'Identity Verified. Proceeding to reset password...');
+
+    setTimeout(() => {
+        toggleAuthForm('reset');
+    }, 1500);
+}
+
+function handleResetPassword(e) {
+    e.preventDefault();
+    const errorDiv = document.getElementById('reset-error');
+    errorDiv.classList.add('hidden');
+
+    const newPwd = document.getElementById('new-pwd').value;
+    const confirmNewPwd = document.getElementById('confirm-new-pwd').value;
+
+    if (!validatePassword(newPwd)) {
+        showError(errorDiv, 'Password must be at least 8 characters, contain 1 uppercase letter and 1 number.');
+        return;
+    }
+
+    if (newPwd !== confirmNewPwd) {
+        showError(errorDiv, 'Passwords do not match.');
+        return;
+    }
+
+    const userIdx = users.findIndex(u => u.id === resetUserId);
+    if (userIdx !== -1) {
+        users[userIdx].pwd = newPwd;
+        localStorage.setItem('ecgUsers', JSON.stringify(users));
+
+        alert('Password Updated Successfully! Please login with your new password.');
+        toggleAuthForm('login');
+        resetUserId = null;
+    }
 }
 
 function showError(el, msg) {
@@ -503,7 +647,8 @@ function showError(el, msg) {
 
 // Dashboard Update
 function updateDashboard() {
-    document.getElementById('dash-name').textContent = currentUser.name;
+    const firstName = currentUser.name.split(' ')[0];
+    document.getElementById('dash-name').textContent = firstName;
     document.getElementById('dash-id').textContent = currentUser.staffId;
 
     const deptEl = document.getElementById('dash-dept');
@@ -544,10 +689,10 @@ function switchAdminTab(tab) {
     // Hide all sections
     const sections = ['overview', 'requests', 'users', 'logs'];
     sections.forEach(s => {
-        const el = document.getElementById(`section-${s}`);
+        const el = document.getElementById(`section - ${s} `);
         if (el) el.classList.add('view-hidden');
 
-        const sideBtn = document.getElementById(`side-tab-${s}`);
+        const sideBtn = document.getElementById(`side - tab - ${s} `);
         if (sideBtn) {
             sideBtn.classList.remove('bg-blue-50', 'text-ecgBlue', 'border', 'border-blue-100', 'font-bold');
             sideBtn.classList.add('text-gray-600', 'hover:bg-gray-50', 'font-medium');
@@ -558,10 +703,10 @@ function switchAdminTab(tab) {
     });
 
     // Show active section
-    const activeSection = document.getElementById(`section-${tab}`);
+    const activeSection = document.getElementById(`section - ${tab} `);
     if (activeSection) activeSection.classList.remove('view-hidden');
 
-    const activeSideBtn = document.getElementById(`side-tab-${tab}`);
+    const activeSideBtn = document.getElementById(`side - tab - ${tab} `);
     if (activeSideBtn) {
         activeSideBtn.classList.add('bg-blue-50', 'text-ecgBlue', 'border', 'border-blue-100', 'font-bold');
         activeSideBtn.classList.remove('text-gray-600', 'hover:bg-gray-50', 'font-medium');
@@ -650,25 +795,29 @@ function renderAdminAuditLogs() {
         div.innerHTML = `
             <div class="flex-1">
                 <div class="flex items-center space-x-2">
-                    <span class="text-xs font-bold px-2 py-0.5 bg-gray-100 text-gray-600 rounded uppercase tracking-tighter">${log.type}</span>
+                    <span class="text-xs font-bold px-2 py-0.5 bg-gray-100 text-gray-600 rounded uppercase tracking-tighter">${log.target_type || log.type}</span>
                     <span class="text-sm font-bold ${actionColor}">${log.action}</span>
                 </div>
                 <p class="text-sm text-gray-600 mt-1">${log.details}</p>
             </div>
             <div class="text-right">
-                <p class="text-xs font-bold text-gray-900">${log.adminName}</p>
-                <p class="text-[10px] text-gray-400">${new Date(log.timestamp).toLocaleString()}</p>
+                <p class="text-xs font-bold text-gray-900">${log.admin_name || log.adminName}</p>
+                <p class="text-[10px] text-gray-400">${new Date(log.created_at || log.timestamp).toLocaleString()}</p>
             </div>
         `;
         logContainer.appendChild(div);
     });
 }
 
-function clearAuditLogs() {
-    if (confirm('Are you sure you want to clear all system audit logs? This action is permanent.')) {
+async function clearAuditLogs() {
+    if (!confirm('Are you sure you want to clear all system audit logs? This action is permanent.')) return;
+    try {
+        const data = await apiPost('admin_action.php', { action: 'clear_logs' });
+        if (!data.success) throw new Error(data.message);
         auditLogs = [];
-        localStorage.setItem('ecgAuditLogs', JSON.stringify(auditLogs));
         renderAdminAuditLogs();
+    } catch (e) {
+        alert('Failed to clear logs: ' + e.message);
     }
 }
 
@@ -680,37 +829,41 @@ function adminCloseAddUserModal() {
     document.getElementById('add-user-modal').classList.add('view-hidden');
 }
 
-function handleAdminAddUser(e) {
+async function handleAdminAddUser(e) {
     e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Creating Account...';
+
     const name = document.getElementById('add-staff-name').value;
     const staffId = document.getElementById('add-staff-id').value;
     const dept = document.getElementById('add-staff-dept').value;
     const email = document.getElementById('add-staff-email').value;
     const pwd = document.getElementById('add-staff-pwd').value;
 
-    if (users.some(u => u.staffId === staffId)) {
-        alert('Staff ID already exists!');
-        return;
+    try {
+        const data = await apiPost('admin_action.php', {
+            action: 'add_user',
+            name, staff_id: staffId, dept, email, password: pwd
+        });
+        if (!data.success) throw new Error(data.message);
+
+        await addAuditLog('Created Staff Account', 'System Admin',
+            `Manually created account for ${name} (${staffId}) in ${dept} department.`);
+
+        await refreshData();
+        renderAdminUsers();
+        adminCloseAddUserModal();
+        e.target.reset();
+        alert('Staff account created successfully. They can now log in.');
+    } catch (error) {
+        console.error('Admin Add User Error:', error);
+        alert('Failed to create account: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
     }
-
-    const newUser = {
-        id: Date.now(),
-        name,
-        staffId,
-        dept,
-        email,
-        pwd,
-        profileCompleted: false
-    };
-
-    users.push(newUser);
-    localStorage.setItem('ecgUsers', JSON.stringify(users));
-
-    addAuditLog('Created Staff Account', 'System Admin', `Manually created account for ${name} (${staffId}) in ${dept} department.`);
-
-    renderAdminUsers();
-    adminCloseAddUserModal();
-    alert('Staff account created successfully.');
 }
 
 function adminViewUser(userId) {
@@ -722,23 +875,23 @@ function adminViewUser(userId) {
         <div class="flex items-start justify-between mb-8">
             <div class="flex items-center">
                 <img class="h-20 w-20 rounded-2xl border-4 border-white shadow-lg object-cover" src="${user.profilePic || 'https://ui-avatars.com/api/?name=' + user.name + '&size=128'}">
-                <div class="ml-6">
-                    <h2 class="text-2xl font-bold text-ecgBlue font-display">${user.name}</h2>
-                    <p class="text-gray-500 font-medium">${user.staffId} • ${user.dept} Department</p>
-                    <span class="mt-2 inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${user.profileCompleted ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-yellow-100 text-yellow-800 border border-yellow-200'}">
-                        ${user.profileCompleted ? 'Profile Verified & Locked' : 'Incomplete Profile'}
-                    </span>
-                    ${currentUser.role === ROLES.SUPER_ADMIN ? `
+                    <div class="ml-6">
+                        <h2 class="text-2xl font-bold text-ecgBlue font-display">${user.name}</h2>
+                        <p class="text-gray-500 font-medium">${user.staffId} • ${user.dept} Department</p>
+                        <span class="mt-2 inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${user.profileCompleted ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-yellow-100 text-yellow-800 border border-yellow-200'}">
+                            ${user.profileCompleted ? 'Profile Verified & Locked' : 'Incomplete Profile'}
+                        </span>
+                        ${currentUser.role === ROLES.SUPER_ADMIN ? `
                     <div class="mt-3">
                         <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Assign User Role</label>
-                        <select onchange="adminUpdateUserRole(${user.id}, this.value)" class="bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold p-1 text-ecgBlue outline-none">
+                        <select onchange="adminUpdateUserRole('${user.id}', this.value)" class="bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold p-1 text-ecgBlue outline-none">
                             <option value="${ROLES.STAFF}" ${user.role === ROLES.STAFF ? 'selected' : ''}>Staff Member</option>
                             <option value="${ROLES.MANAGER}" ${user.role === ROLES.MANAGER ? 'selected' : ''}>Manager (Admin)</option>
                             <option value="${ROLES.SUPER_ADMIN}" ${user.role === ROLES.SUPER_ADMIN ? 'selected' : ''}>Super Admin (IT)</option>
                         </select>
                     </div>
                     ` : ''}
-                </div>
+                    </div>
             </div>
         </div>
 
@@ -765,7 +918,14 @@ function adminViewUser(userId) {
                 <div>
                     <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Family & Dependants</h3>
                     <div class="bg-gray-50 rounded-xl p-4 border border-gray-100 mb-3 text-sm">
-                        <div class="flex justify-between items-center"><span class="text-gray-500">Spouse:</span> <span class="font-bold text-gray-900">${user.spouse ? user.spouse.name : 'No spouse listed'}</span></div>
+                        <div class="flex justify-between items-center mb-2"><span class="text-gray-500">Spouse:</span> <span class="font-bold text-gray-900">${user.spouse ? user.spouse.name : 'No spouse listed'}</span></div>
+                        ${user.spousePic ? `<img src="${user.spousePic}" class="h-16 w-16 rounded-lg object-cover border border-white shadow-sm mb-2" title="Spouse Picture">` : ''}
+                        ${user.spouse_id_url ? `
+                            <a href="${user.spouse_id_url}" target="_blank" class="text-[10px] font-bold text-ecgBlue hover:underline flex items-center bg-white p-1.5 rounded border border-gray-100">
+                                <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                View ID Document
+                            </a>
+                        ` : ''}
                     </div>
                     <div class="bg-gray-50 rounded-xl p-4 border border-gray-100 text-sm">
                         <span class="text-gray-500 block mb-3">Children:</span>
@@ -780,7 +940,7 @@ function adminViewUser(userId) {
         <div class="mt-8 pt-6 border-t border-gray-100">
             <h3 class="text-sm font-bold text-ecgBlue mb-4">Account Administration</h3>
             <div class="flex space-x-4">
-                <button onclick="adminToggleProfileLock(${user.id}); adminCloseUserDetails();" class="flex-1 bg-white border border-ecgBlue text-ecgBlue px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-50 transition-all">
+                <button onclick="adminToggleProfileLock('${user.id}'); adminCloseUserDetails();" class="flex-1 bg-white border border-ecgBlue text-ecgBlue px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-50 transition-all">
                     ${user.profileCompleted ? 'Unlock Profile File' : 'Verify & Lock Profile'}
                 </button>
                 <button onclick="window.location.href='mailto:${user.email}'" class="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-xl text-sm font-bold hover:bg-gray-200 transition-all">Contact Staff</button>
@@ -795,27 +955,36 @@ function adminCloseUserDetails() {
     document.getElementById('user-details-modal').classList.add('view-hidden');
 }
 
-function adminUpdateUserRole(userId, newRole) {
+async function adminUpdateUserRole(userId, newRole) {
     if (currentUser.role !== ROLES.SUPER_ADMIN) {
         alert('Permission Denied: Only Super Admins can assign roles.');
         return;
     }
 
-    const userIdx = users.findIndex(u => u.id === userId);
-    if (userIdx !== -1) {
-        const user = users[userIdx];
-        const oldRoleName = Object.keys(ROLES).find(key => ROLES[key] === user.role);
-        const newRoleName = Object.keys(ROLES).find(key => ROLES[key] === parseInt(newRole));
+    const userIdx = users.findIndex(u => u.id == userId);
+    if (userIdx === -1) return;
+    const user = users[userIdx];
+    const oldRoleName = Object.keys(ROLES).find(key => ROLES[key] === user.role);
+    const newRoleName = Object.keys(ROLES).find(key => ROLES[key] === parseInt(newRole));
+
+    try {
+        const data = await apiPost('admin_action.php', {
+            action: 'update_role',
+            user_id: userId,
+            new_role: parseInt(newRole)
+        });
+        if (!data.success) throw new Error(data.message);
 
         user.role = parseInt(newRole);
-        localStorage.setItem('ecgUsers', JSON.stringify(users));
-
-        addAuditLog('Updated User Role', 'System Admin',
+        await addAuditLog('Updated User Role', 'System Admin',
             `Changed role for ${user.name} (${user.staffId}) from ${oldRoleName} to ${newRoleName}.`);
 
         renderAdminUsers();
-        alert(`Role for ${user.name} has been updated to ${newRoleName}.`);
-        adminViewUser(userId); // Refresh modal content
+        alert(`Role for ${user.name} updated to ${newRoleName}.`);
+        adminViewUser(userId);
+    } catch (error) {
+        console.error('Role Update Error:', error);
+        alert('Failed to update role: ' + error.message);
     }
 }
 
@@ -834,7 +1003,7 @@ function toggleDependantSections() {
 
     if (type === 'Self') {
         depContainer.classList.remove('hidden');
-        depSelect.innerHTML = `<option value="${currentUser.name}">${currentUser.name} (Self)</option>`;
+        depSelect.innerHTML = `< option value = "${currentUser.name}" > ${currentUser.name} (Self)</option > `;
     } else if (type === 'Spouse') {
         if (!currentUser.spouse || !currentUser.spouse.name) {
             alert('No spouse configured in your profile. Please contact an administrator to update your profile.');
@@ -842,7 +1011,7 @@ function toggleDependantSections() {
             return;
         }
         depContainer.classList.remove('hidden');
-        depSelect.innerHTML = `<option value="${currentUser.spouse.name}">${currentUser.spouse.name} (Spouse)</option>`;
+        depSelect.innerHTML = `< option value = "${currentUser.spouse.name}" > ${currentUser.spouse.name} (Spouse)</option > `;
     } else if (type === 'Child') {
         if (!currentUser.children || currentUser.children.length === 0) {
             alert('No dependants configured in your profile. Please contact an administrator to update your profile.');
@@ -852,14 +1021,18 @@ function toggleDependantSections() {
         depContainer.classList.remove('hidden');
         let options = '<option value="">Select Dependant...</option>';
         currentUser.children.forEach(c => {
-            options += `<option value="${c.name}">${c.name}</option>`;
+            options += `< option value = "${c.name}" > ${c.name}</option > `;
         });
         depSelect.innerHTML = options;
     }
 }
 
-function handleMedicalRequest(e) {
+async function handleMedicalRequest(e) {
     e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Submitting...';
 
     const dateInput = document.getElementById('req-date').value;
     const reqDate = new Date(dateInput);
@@ -870,6 +1043,7 @@ function handleMedicalRequest(e) {
 
     if (reqDate < today || reqDate > maxDate) {
         alert('Date cannot be in the past or exceed 30 days from today.');
+        btn.disabled = false; btn.textContent = originalText;
         return;
     }
 
@@ -878,32 +1052,34 @@ function handleMedicalRequest(e) {
 
     if (!patientName) {
         alert('Please select the patient requiring medical attention.');
+        btn.disabled = false; btn.textContent = originalText;
         return;
     }
 
-    const reqId = 'REQ-' + Math.floor(100000 + Math.random() * 900000);
+    const purpose = document.getElementById('req-purpose').value;
+    const hospital = document.getElementById('req-hospital').value;
 
-    const newRequest = {
-        id: reqId,
-        userId: currentUser.id,
-        timestamp: new Date().toISOString(),
-        purpose: document.getElementById('req-purpose').value,
-        hospital: document.getElementById('req-hospital').value,
-        targetDate: dateInput,
-        dependantName: patientName,
-        dependantType: type,
-        status: 'Pending'
-    };
-
-    medicalRequests.push(newRequest);
-    localStorage.setItem('ecgRequests', JSON.stringify(medicalRequests));
-
-    alert(`Medical Request Submitted Successfully!\nRequest ID: ${reqId}`);
-    window.location.href = 'history.html';
+    try {
+        const data = await apiPost('submit_request.php', {
+            purpose, hospital,
+            request_date: dateInput,
+            patient_type: type,
+            patient_name: patientName
+        });
+        if (!data.success) throw new Error(data.message);
+        alert(`Medical Request Submitted Successfully!\nRequest ID: REQ-${data.id}`);
+        window.location.href = 'history.html';
+    } catch (error) {
+        console.error('Request Error:', error);
+        alert('Failed to submit request: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
 }
 
 // Medical History Methods
-function renderHistory() {
+async function renderHistory() {
     const tbody = document.getElementById('history-table-body');
     const emptyDiv = document.getElementById('history-empty');
     if (!tbody || !emptyDiv) return;
@@ -912,13 +1088,45 @@ function renderHistory() {
 
     tbody.innerHTML = '';
 
-    let userRequests = medicalRequests.filter(r => r.userId === currentUser.id);
+    let userRequests = [];
 
-    if (filter !== 'All') {
-        userRequests = userRequests.filter(r => r.status === filter);
+    if (typeof supabase !== 'undefined') {
+        try {
+            let query = supabase.from('medical_requests').select('*').eq('user_id', currentUser.id);
+            if (filter !== 'All') {
+                query = query.eq('status', filter);
+            }
+            const { data, error } = await query.order('created_at', { ascending: false }); // Assuming 'created_at' for timestamp
+            if (error) throw error;
+            userRequests = data.map(req => ({
+                id: req.id,
+                userId: req.user_id,
+                timestamp: req.created_at,
+                purpose: req.purpose,
+                hospital: req.hospital,
+                targetDate: req.request_date,
+                dependantName: req.dependant_name,
+                dependantType: req.patient_type,
+                status: req.status,
+                rejectionReason: req.rejection_reason
+            }));
+        } catch (error) {
+            console.error('Error fetching medical requests from Supabase:', error);
+            // Fallback to localStorage if Supabase fails
+            userRequests = medicalRequests.filter(r => r.userId === currentUser.id);
+            if (filter !== 'All') {
+                userRequests = userRequests.filter(r => r.status === filter);
+            }
+            userRequests.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        }
+    } else {
+        // Fallback to localStorage
+        userRequests = medicalRequests.filter(r => r.userId === currentUser.id);
+        if (filter !== 'All') {
+            userRequests = userRequests.filter(r => r.status === filter);
+        }
+        userRequests.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     }
-
-    userRequests.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
     if (userRequests.length === 0) {
         emptyDiv.classList.remove('view-hidden');
@@ -937,7 +1145,7 @@ function renderHistory() {
 
             tr.className = 'hover:bg-blue-50/50 transition-colors duration-200';
             tr.innerHTML = `
-                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${dateStr}</td>
+        < td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" > ${dateStr}</td >
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-semibold">${req.dependantName} <span class="text-xs text-gray-500 font-normal ml-1 bg-gray-100 px-2 py-0.5 rounded-full">(${req.dependantType})</span></td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${req.hospital}</td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm">
@@ -948,44 +1156,89 @@ function renderHistory() {
                 <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <button onclick="viewDetails('${req.id}')" class="text-ecgBlue hover:text-white hover:bg-ecgBlue bg-blue-50 px-4 py-1.5 rounded-lg border border-blue-100 shadow-sm transition-all duration-200">View</button>
                 </td>
-            `;
+    `;
             tbody.appendChild(tr);
         });
     }
 }
 
-function viewDetails(reqId) {
-    const req = medicalRequests.find(r => r.id === reqId);
-    if (!req) return;
-
-    document.getElementById('modal-id').textContent = `Req ID: #${req.id}`;
-    let content = `
-        <div class="grid grid-cols-2 gap-y-6 gap-x-4">
-            <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Submitted On</strong> <span class="text-gray-900 font-medium">${new Date(req.timestamp).toLocaleString()}</span></div>
-            <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Status</strong> <span class="font-bold border px-3 py-1 rounded-full text-xs inline-block shadow-sm ${getStatusClass(req.status)}">${req.status}</span></div>
-            <div class="col-span-2 bg-gray-50/50 p-4 rounded-xl border border-gray-100"><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-2">Purpose</strong> <span class="text-gray-800 leading-relaxed">${req.purpose}</span></div>
-            <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Hospital</strong> <span class="text-gray-900 font-medium">${req.hospital}</span></div>
-            <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Target Date</strong> <span class="text-gray-900 font-medium">${req.targetDate}</span></div>
-            ${(!currentUser.isAdmin && pageId !== 'page-admin') ? `
-            <div class="col-span-2 pt-4 border-t border-gray-100 mt-2"><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Primary Patient</strong> <span class="text-gray-900 font-bold text-base">${req.dependantName} <span class="text-sm font-normal text-gray-500 ml-1 bg-gray-100 px-2 py-0.5 rounded-full">(${req.dependantType})</span></span></div>
-            ` : ''}
-        </div>
-    `;
-
-    if (!currentUser.isAdmin && pageId !== 'page-admin') {
-        if (req.dependantType === 'Spouse') {
-            content += `<div class="mt-4 p-4 bg-blue-50/50 border border-blue-100 rounded-xl"><strong class="text-sm font-bold text-ecgBlue block mb-2 flex items-center"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>Spouse Details</strong> <div class="grid grid-cols-2 gap-2 text-sm text-gray-700"><div>Name: <span class="font-medium text-gray-900">${req.spouseName}</span></div><div>DOB: <span class="font-medium text-gray-900">${req.spouseDob}</span></div><div class="col-span-2 mt-1 flex items-center text-green-600"><svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg> File Previously Uploaded Check</div></div></div>`;
-        } else if (req.dependantType === 'Child' && req.children) {
-            content += `<div class="mt-4 p-4 bg-yellow-50/50 border border-yellow-100 rounded-xl"><strong class="text-sm font-bold text-yellow-700 block mb-3 flex items-center"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>Children Details</strong><div class="space-y-3">`;
-            req.children.forEach(c => {
-                content += `<div class="bg-white p-3 rounded-lg border border-yellow-200/50 shadow-sm text-sm"><div class="font-bold text-gray-900">${c.name}</div><div class="text-gray-600 mt-1 flex justify-between"><span>Born: ${c.dob}</span><span class="text-green-600 flex items-center"><svg class="w-3.5 h-3.5 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>File Uploaded</span></div></div>`;
-            });
-            content += `</div></div>`;
+async function viewDetails(reqId) {
+    let req = medicalRequests.find(r => r.id === reqId);
+    if (!req) {
+        // Try fetching from Supabase if not found locally
+        if (typeof supabase !== 'undefined') {
+            try {
+                const { data, error } = await supabase.from('medical_requests').select('*').eq('id', reqId).single();
+                if (error && error.code !== 'PGRST116') throw error;
+                if (data) {
+                    req = {
+                        id: data.id,
+                        userId: data.user_id,
+                        timestamp: data.created_at,
+                        purpose: data.purpose,
+                        hospital: data.hospital,
+                        targetDate: data.request_date,
+                        dependantName: data.dependant_name,
+                        dependantType: data.patient_type,
+                        status: data.status,
+                        rejectionReason: data.rejection_reason
+                    };
+                    // Add to local cache if not present
+                    const existingIdx = medicalRequests.findIndex(r => r.id === req.id);
+                    if (existingIdx === -1) {
+                        medicalRequests.push(req);
+                    } else {
+                        medicalRequests[existingIdx] = req;
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching request from Supabase:', error);
+            }
         }
     }
 
+    if (!req) return;
+
+    const staff = users.find(u => u.id === req.userId);
+
+    document.getElementById('modal-id').textContent = `Req ID: #${req.id} `;
+    let content = `
+        < div class="grid grid-cols-2 gap-y-6 gap-x-4" >
+            <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Submitted On</strong> <span class="text-gray-900 font-medium">${new Date(req.timestamp).toLocaleString()}</span></div>
+            <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Status</strong> <span class="font-bold border px-3 py-1 rounded-full text-xs inline-block shadow-sm ${getStatusClass(req.status)}">${req.status}</span></div>
+            
+            ${pageId === 'page-admin' ? `
+            <div class="col-span-2 bg-blue-50/30 p-4 rounded-xl border border-blue-100/50">
+                <strong class="text-xs font-bold text-blue-600 uppercase tracking-wider block mb-1">Staff Member</strong> 
+                <span class="text-gray-900 font-bold text-base">${staff ? staff.name : 'Unknown Staff'} <span class="text-xs text-gray-500 font-normal ml-1">(${staff ? staff.staffId : 'N/A'})</span></span>
+            </div>
+            ` : ''
+        }
+
+            <div class="col-span-2 bg-gray-50/50 p-4 rounded-xl border border-gray-100"><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-2">Purpose</strong> <span class="text-gray-800 leading-relaxed">${req.purpose}</span></div>
+            <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Hospital</strong> <span class="text-gray-900 font-medium">${req.hospital}</span></div>
+            <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Target Date</strong> <span class="text-gray-900 font-medium">${req.targetDate}</span></div>
+            
+            <div class="col-span-2 pt-4 border-t border-gray-100 mt-2">
+                <strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Primary Patient</strong> 
+                <span class="text-gray-900 font-bold text-base">${req.dependantName} <span class="text-sm font-normal text-gray-500 ml-1 bg-gray-100 px-2 py-0.5 rounded-full">(${req.dependantType})</span></span>
+            </div>
+        </div >
+        `;
+
+    // Show extra details for dependants
+    if (req.dependantType === 'Spouse') {
+        content += `< div class="mt-4 p-4 bg-blue-50/50 border border-blue-100 rounded-xl" ><strong class="text-sm font-bold text-ecgBlue block mb-2 flex items-center"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>Spouse Details</strong> <div class="grid grid-cols-2 gap-2 text-sm text-gray-700"><div>Name: <span class="font-medium text-gray-900">${req.spouseName || req.dependantName}</span></div><div>DOB: <span class="font-medium text-gray-900">${req.spouseDob || 'N/A'}</span></div></div></div > `;
+    } else if (req.dependantType === 'Child' && req.children) {
+        content += `< div class="mt-4 p-4 bg-yellow-50/50 border border-yellow-100 rounded-xl" ><strong class="text-sm font-bold text-yellow-700 block mb-3 flex items-center"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>Children Details</strong><div class="space-y-3">`;
+        req.children.forEach(c => {
+            content += `<div class="bg-white p-3 rounded-lg border border-yellow-200/50 shadow-sm text-sm"><div class="font-bold text-gray-900">${c.name}</div><div class="text-gray-600 mt-1">Born: ${c.dob}</div></div>`;
+        });
+        content += `</div></div > `;
+    }
+
     if (req.status === 'Rejected' && req.rejectionReason) {
-        content += `<div class="mt-4 p-4 bg-red-50/80 border border-red-200 rounded-xl text-red-800"><strong class="font-bold flex items-center mb-1"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>Rejection Reason</strong><p class="text-sm mt-1 ml-5.5 text-red-700">${req.rejectionReason}</p></div>`;
+        content += `< div class="mt-4 p-4 bg-red-50/80 border border-red-200 rounded-xl text-red-800" ><strong class="font-bold flex items-center mb-1"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>Rejection Reason</strong><p class="text-sm mt-1 ml-5.5 text-red-700">${req.rejectionReason}</p></div > `;
     }
 
     document.getElementById('modal-content').innerHTML = content;
@@ -1139,7 +1392,7 @@ function addProfileChildRow(childData = null) {
     const dobVal = childData ? childData.dob : '';
 
     div.innerHTML = `
-        <div>
+        < div >
             <label class="block text-sm font-semibold text-gray-700 mb-1">Child Name *</label>
             <input type="text" value="${nameVal}" required class="input-premium prof-child-name block w-full bg-white border border-gray-200 rounded-lg shadow-sm py-2 px-3 focus:ring-2 focus:ring-ecgBlue/50 focus:border-ecgBlue sm:text-sm">
         </div>
@@ -1158,88 +1411,106 @@ function addProfileChildRow(childData = null) {
     container.appendChild(div);
 }
 
-function handleProfileSave(e) {
+async function handleProfileSave(e) {
     e.preventDefault();
+    const btn = document.getElementById('prof-submit-btn');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Saving Profile...';
 
-    // Extract staff edits
-    currentUser.name = document.getElementById('prof-staff-name').value;
-    currentUser.email = document.getElementById('prof-staff-email').value;
-    currentUser.phone = document.getElementById('prof-staff-phone').value;
-    currentUser.dob = document.getElementById('prof-staff-dob').value;
-    currentUser.designation = document.getElementById('prof-staff-designation').value;
-    currentUser.region = document.getElementById('prof-staff-region').value;
-    currentUser.district = document.getElementById('prof-staff-district').value;
+    try {
+        // Build FormData to support file uploads
+        const form = new FormData();
 
-    const spouseName = document.getElementById('prof-spouse-name').value;
-    const spouseDob = document.getElementById('prof-spouse-dob').value;
-    const spouseFile = document.getElementById('prof-spouse-id').files[0];
+        // Text fields
+        form.append('name', document.getElementById('prof-staff-name').value);
+        form.append('phone', document.getElementById('prof-staff-phone').value);
+        form.append('dob', document.getElementById('prof-staff-dob').value);
+        form.append('designation', document.getElementById('prof-staff-designation').value);
+        form.append('region', document.getElementById('prof-staff-region').value);
+        form.append('district', document.getElementById('prof-staff-district').value);
 
-    let spouseObj = currentUser.spouse || null;
-    if (spouseName && spouseDob) {
-        if (!spouseFile && !spouseObj) {
-            alert('Spouse Identification file is required');
-            return;
-        }
-        spouseObj = {
-            name: spouseName,
-            dob: spouseDob,
-            phone: document.getElementById('prof-spouse-phone').value,
-            idType: document.getElementById('prof-spouse-idtype').value,
-            idNumber: document.getElementById('prof-spouse-idnumber').value,
-            hasFileName: spouseFile ? spouseFile.name : (spouseObj ? spouseObj.hasFileName : 'Not Provided')
-        };
-    }
+        // Spouse fields
+        form.append('spouse_name', document.getElementById('prof-spouse-name').value);
+        form.append('spouse_dob', document.getElementById('prof-spouse-dob').value);
+        form.append('spouse_phone', document.getElementById('prof-spouse-phone').value);
+        form.append('spouse_idtype', document.getElementById('prof-spouse-idtype').value);
+        form.append('spouse_idnumber', document.getElementById('prof-spouse-idnumber').value);
 
-    const entries = document.querySelectorAll('.prof-child-entry');
-    const children = [];
-
-    let childError = false;
-    entries.forEach((entry, idx) => {
-        const file = entry.querySelector('.prof-child-file').files[0];
-        const existingChild = (currentUser.children && currentUser.children[idx]) ? currentUser.children[idx] : null;
-
-        if (!file && !existingChild) {
-            childError = true;
-        }
-
-        children.push({
-            name: entry.querySelector('.prof-child-name').value,
-            dob: entry.querySelector('.prof-child-dob').value,
-            hasFileName: file ? file.name : (existingChild ? existingChild.hasFileName : 'Not Provided')
+        // Children
+        const childEntries = document.querySelectorAll('.prof-child-entry');
+        childEntries.forEach(entry => {
+            form.append('child_name[]', entry.querySelector('.prof-child-name').value);
+            form.append('child_dob[]', entry.querySelector('.prof-child-dob').value);
         });
-    });
 
-    if (childError) {
-        alert('Birth certificate is required for new children entries.');
-        return;
-    }
+        // Profile picture file
+        const profilePicInput = document.getElementById('prof-pic-file');
+        if (profilePicInput && profilePicInput.files[0]) {
+            form.append('profile_pic', profilePicInput.files[0]);
+        }
 
-    if (tempProfilePicBase64) {
-        currentUser.profilePic = tempProfilePicBase64;
-    }
+        // Spouse picture file
+        const spousePicInput = document.getElementById('prof-spouse-pic-file');
+        if (spousePicInput && spousePicInput.files[0]) {
+            form.append('spouse_pic', spousePicInput.files[0]);
+        }
 
-    if (tempSpousePicBase64) {
-        currentUser.spousePic = tempSpousePicBase64;
-    }
+        // Spouse ID document
+        const spouseIdInput = document.getElementById('prof-spouse-id');
+        if (spouseIdInput && spouseIdInput.files[0]) {
+            form.append('spouse_id', spouseIdInput.files[0]);
+        }
 
-    currentUser.spouse = spouseObj;
-    currentUser.children = children;
-    currentUser.profileCompleted = true;
+        const res = await fetch('save_profile.php', { method: 'POST', body: form });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message);
 
-    // Update local storage
-    const userIndex = users.findIndex(u => u.id === currentUser.id);
-    if (userIndex !== -1) {
-        users[userIndex] = currentUser;
-        localStorage.setItem('ecgUsers', JSON.stringify(users));
+        // Update local session with fresh data from server
+        Object.assign(currentUser, data.user);
+        currentUser.profileCompleted = true;
         sessionStorage.setItem('ecgCurrentUser', JSON.stringify(currentUser));
-        alert('Profile saved successfully!');
+
+        alert('Profile saved successfully! Your profile is now locked for verification.');
         window.location.href = 'dashboard.html';
+    } catch (error) {
+        console.error('Profile Save Error:', error);
+        alert('Failed to save profile: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
     }
 }
 
 // Data Export & Reporting Functions
-function exportToCSV() {
-    if (medicalRequests.length === 0) {
+async function exportToCSV() {
+    let requestsToExport = [];
+
+    if (typeof supabase !== 'undefined') {
+        try {
+            const { data, error } = await supabase.from('medical_requests').select('*');
+            if (error) throw error;
+            requestsToExport = data.map(req => ({
+                id: req.id,
+                userId: req.user_id,
+                timestamp: req.created_at,
+                purpose: req.purpose,
+                hospital: req.hospital,
+                targetDate: req.request_date,
+                dependantName: req.dependant_name,
+                dependantType: req.patient_type,
+                status: req.status
+            }));
+        } catch (error) {
+            console.error('Error fetching medical requests for export from Supabase:', error);
+            alert('Failed to fetch data for export. Using local data if available.');
+            requestsToExport = medicalRequests; // Fallback
+        }
+    } else {
+        requestsToExport = medicalRequests;
+    }
+
+    if (requestsToExport.length === 0) {
         alert('No data available to export.');
         return;
     }

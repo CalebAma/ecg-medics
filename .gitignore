@@ -3,3 +3,9 @@
 .agent/
 *.log
 /tmp/
+
+# Uploaded user files (profile pics, documents)
+/uploads/
+
+# Local environment config (if you ever create one)
+config.local.php
