@@ -86,7 +86,7 @@ INSERT INTO `users` (`staff_id`, `full_name`, `email`, `password_hash`, `dept`, 
 VALUES (
   'ADMIN001',
   'System Administrator',
-  'admin@ecg.com.gh',
+  'admin@ecggh.com',
   '$2y$10$e0MYzXyjpJS7Zp0m2aBDgu3OL2V7PVL3i7ZwKqYH0fN4gY9KFUMFi', -- Admin@1234
   'IT',
   2,

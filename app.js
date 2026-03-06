@@ -407,7 +407,8 @@ function toggleMobileMenu() {
 
 function handleAdminNavbar() {
     if (!currentUser || (!currentUser.isAdmin && currentUser.role === ROLES.STAFF)) return;
-    const navbar = document.querySelector('#app-navbar .md\\:flex');
+    let navbar = document.querySelector('#app-navbar .md\\:flex');
+    if (!navbar) navbar = document.querySelector('#app-navbar .flex.items-center.space-x-4');
     if (navbar && !document.getElementById('nav-admin-link')) {
         const divider = document.createElement('div');
         divider.className = 'border-l border-blue-700 h-6 mx-2';
@@ -441,7 +442,7 @@ function updateNavbarUser() {
     const firstName = currentUser.name.split(' ')[0];
 
     userInfo.innerHTML = `
-        < div class="flex items-center space-x-3 bg-white/5 px-3 py-1.5 rounded-xl border border-white/10 backdrop-blur-sm mr-4" >
+        <div class="flex items-center space-x-3 bg-white/5 px-3 py-1.5 rounded-xl border border-white/10 backdrop-blur-sm mr-4">
             <div class="text-right hidden sm:block">
                 <p class="text-xs font-bold text-white tracking-wide">${firstName}</p>
                 <p class="text-[10px] font-medium text-gray-400 uppercase tracking-tighter">${roleName}</p>
@@ -449,7 +450,7 @@ function updateNavbarUser() {
             <div class="h-8 w-8 rounded-lg overflow-hidden border border-white/20 shadow-inner">
                 <img src="${currentUser.profilePic || 'https://ui-avatars.com/api/?name=' + currentUser.name + '&background=f3b204&color=0b3b60'}" class="h-full w-full object-cover">
             </div>
-        </div >
+        </div>
         `;
 }
 
@@ -479,7 +480,7 @@ function showSuccess(el, msg) {
 
 // Validation Helpers
 const validatePassword = (pwd) => /^(?=.*[A-Z])(?=.*\d).{8,}$/.test(pwd);
-const validateEcgEmail = (email) => email.toLowerCase().endsWith('@ecg.com.gh');
+const validateEcgEmail = (email) => email.toLowerCase().endsWith('@ecggh.com');
 
 // Signup
 async function handleSignup(e) {
@@ -502,7 +503,7 @@ async function handleSignup(e) {
     const confirmPwd = document.getElementById('reg-confirm').value;
 
     if (!validateEcgEmail(email)) {
-        showError(errorDiv, 'Email must use the ECG domain (@ecg.com.gh).');
+        showError(errorDiv, 'Email must use the ECG domain (@ecggh.com).');
         btn.disabled = false; btn.textContent = originalText;
         return;
     }
@@ -667,10 +668,10 @@ function switchAdminTab(tab) {
     // Hide all sections
     const sections = ['overview', 'requests', 'users', 'logs'];
     sections.forEach(s => {
-        const el = document.getElementById(`section - ${s} `);
+        const el = document.getElementById(`section-${s}`);
         if (el) el.classList.add('view-hidden');
 
-        const sideBtn = document.getElementById(`side - tab - ${s} `);
+        const sideBtn = document.getElementById(`side-tab-${s}`);
         if (sideBtn) {
             sideBtn.classList.remove('bg-blue-50', 'text-ecgBlue', 'border', 'border-blue-100', 'font-bold');
             sideBtn.classList.add('text-gray-600', 'hover:bg-gray-50', 'font-medium');
@@ -681,10 +682,10 @@ function switchAdminTab(tab) {
     });
 
     // Show active section
-    const activeSection = document.getElementById(`section - ${tab} `);
+    const activeSection = document.getElementById(`section-${tab}`);
     if (activeSection) activeSection.classList.remove('view-hidden');
 
-    const activeSideBtn = document.getElementById(`side - tab - ${tab} `);
+    const activeSideBtn = document.getElementById(`side-tab-${tab}`);
     if (activeSideBtn) {
         activeSideBtn.classList.add('bg-blue-50', 'text-ecgBlue', 'border', 'border-blue-100', 'font-bold');
         activeSideBtn.classList.remove('text-gray-600', 'hover:bg-gray-50', 'font-medium');
@@ -981,7 +982,7 @@ function toggleDependantSections() {
 
     if (type === 'Self') {
         depContainer.classList.remove('hidden');
-        depSelect.innerHTML = `< option value = "${currentUser.name}" > ${currentUser.name} (Self)</option > `;
+        depSelect.innerHTML = `<option value="${currentUser.name}">${currentUser.name} (Self)</option>`;
     } else if (type === 'Spouse') {
         if (!currentUser.spouse || !currentUser.spouse.name) {
             alert('No spouse configured in your profile. Please contact an administrator to update your profile.');
@@ -989,7 +990,7 @@ function toggleDependantSections() {
             return;
         }
         depContainer.classList.remove('hidden');
-        depSelect.innerHTML = `< option value = "${currentUser.spouse.name}" > ${currentUser.spouse.name} (Spouse)</option > `;
+        depSelect.innerHTML = `<option value="${currentUser.spouse.name}">${currentUser.spouse.name} (Spouse)</option>`;
     } else if (type === 'Child') {
         if (!currentUser.children || currentUser.children.length === 0) {
             alert('No dependants configured in your profile. Please contact an administrator to update your profile.');
@@ -999,7 +1000,7 @@ function toggleDependantSections() {
         depContainer.classList.remove('hidden');
         let options = '<option value="">Select Dependant...</option>';
         currentUser.children.forEach(c => {
-            options += `< option value = "${c.name}" > ${c.name}</option > `;
+            options += `<option value="${c.name}">${c.name}</option>`;
         });
         depSelect.innerHTML = options;
     }
@@ -1092,7 +1093,7 @@ async function renderHistory() {
 
             tr.className = 'hover:bg-blue-50/50 transition-colors duration-200';
             tr.innerHTML = `
-        < td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" > ${dateStr}</td >
+        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${dateStr}</td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-semibold">${req.dependantName} <span class="text-xs text-gray-500 font-normal ml-1 bg-gray-100 px-2 py-0.5 rounded-full">(${req.dependantType})</span></td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${req.hospital}</td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm">
@@ -1115,9 +1116,9 @@ async function viewDetails(reqId) {
 
     const staff = users.find(u => u.id === req.userId);
 
-    document.getElementById('modal-id').textContent = `Req ID: #${req.id} `;
+    document.getElementById('modal-id').textContent = `Req ID: #${req.id}`;
     let content = `
-        < div class="grid grid-cols-2 gap-y-6 gap-x-4" >
+        <div class="grid grid-cols-2 gap-y-6 gap-x-4">
             <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Submitted On</strong> <span class="text-gray-900 font-medium">${new Date(req.timestamp).toLocaleString()}</span></div>
             <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Status</strong> <span class="font-bold border px-3 py-1 rounded-full text-xs inline-block shadow-sm ${getStatusClass(req.status)}">${req.status}</span></div>
             
@@ -1137,22 +1138,22 @@ async function viewDetails(reqId) {
                 <strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Primary Patient</strong> 
                 <span class="text-gray-900 font-bold text-base">${req.dependantName} <span class="text-sm font-normal text-gray-500 ml-1 bg-gray-100 px-2 py-0.5 rounded-full">(${req.dependantType})</span></span>
             </div>
-        </div >
+        </div>
         `;
 
     // Show extra details for dependants
     if (req.dependantType === 'Spouse') {
-        content += `< div class="mt-4 p-4 bg-blue-50/50 border border-blue-100 rounded-xl" ><strong class="text-sm font-bold text-ecgBlue block mb-2 flex items-center"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>Spouse Details</strong> <div class="grid grid-cols-2 gap-2 text-sm text-gray-700"><div>Name: <span class="font-medium text-gray-900">${req.spouseName || req.dependantName}</span></div><div>DOB: <span class="font-medium text-gray-900">${req.spouseDob || 'N/A'}</span></div></div></div > `;
+        content += `<div class="mt-4 p-4 bg-blue-50/50 border border-blue-100 rounded-xl"><strong class="text-sm font-bold text-ecgBlue block mb-2 flex items-center"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>Spouse Details</strong> <div class="grid grid-cols-2 gap-2 text-sm text-gray-700"><div>Name: <span class="font-medium text-gray-900">${req.spouseName || req.dependantName}</span></div><div>DOB: <span class="font-medium text-gray-900">${req.spouseDob || 'N/A'}</span></div></div></div>`;
     } else if (req.dependantType === 'Child' && req.children) {
-        content += `< div class="mt-4 p-4 bg-yellow-50/50 border border-yellow-100 rounded-xl" ><strong class="text-sm font-bold text-yellow-700 block mb-3 flex items-center"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>Children Details</strong><div class="space-y-3">`;
+        content += `<div class="mt-4 p-4 bg-yellow-50/50 border border-yellow-100 rounded-xl"><strong class="text-sm font-bold text-yellow-700 block mb-3 flex items-center"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>Children Details</strong><div class="space-y-3">`;
         req.children.forEach(c => {
             content += `<div class="bg-white p-3 rounded-lg border border-yellow-200/50 shadow-sm text-sm"><div class="font-bold text-gray-900">${c.name}</div><div class="text-gray-600 mt-1">Born: ${c.dob}</div></div>`;
         });
-        content += `</div></div > `;
+        content += `</div></div>`;
     }
 
     if (req.status === 'Rejected' && req.rejectionReason) {
-        content += `< div class="mt-4 p-4 bg-red-50/80 border border-red-200 rounded-xl text-red-800" ><strong class="font-bold flex items-center mb-1"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>Rejection Reason</strong><p class="text-sm mt-1 ml-5.5 text-red-700">${req.rejectionReason}</p></div > `;
+        content += `<div class="mt-4 p-4 bg-red-50/80 border border-red-200 rounded-xl text-red-800"><strong class="font-bold flex items-center mb-1"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>Rejection Reason</strong><p class="text-sm mt-1 ml-5.5 text-red-700">${req.rejectionReason}</p></div>`;
     }
 
     document.getElementById('modal-content').innerHTML = content;
@@ -1306,7 +1307,7 @@ function addProfileChildRow(childData = null) {
     const dobVal = childData ? childData.dob : '';
 
     div.innerHTML = `
-        < div >
+        <div>
             <label class="block text-sm font-semibold text-gray-700 mb-1">Child Name *</label>
             <input type="text" value="${nameVal}" required class="input-premium prof-child-name block w-full bg-white border border-gray-200 rounded-lg shadow-sm py-2 px-3 focus:ring-2 focus:ring-ecgBlue/50 focus:border-ecgBlue sm:text-sm">
         </div>
