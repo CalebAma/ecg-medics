@@ -24,7 +24,7 @@ import {
     signOut,
     onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+// import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
 let currentUser = null;
 let pageId = null;
@@ -1398,11 +1398,8 @@ function addProfileChildRow(childData = null) {
             <input type="date" value="${dobVal}" required onchange="calcChildAge(this)" class="input-premium prof-child-dob block w-full bg-white border border-gray-200 rounded-lg shadow-sm py-2 px-3 focus:ring-2 focus:ring-ecgBlue/50 focus:border-ecgBlue sm:text-sm">
             <p class="text-xs text-gray-500 mt-2 font-medium bg-gray-50 border border-gray-100 rounded px-2 py-1 inline-block">Age: ${dobVal ? calculateAge(dobVal) + ' years' : '--'}</p>
         </div>
-        <div class="relative">
-            <label class="block text-sm font-semibold text-gray-700 mb-1">Birth Cert ${childData ? '' : '*'}</label>
-            <input type="file" ${childData ? '' : 'required'} accept=".pdf,.png,.jpeg,.jpg" class="prof-child-file block w-full text-sm text-gray-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-ecgBlue hover:file:bg-blue-100 mt-2">
-            ${childData ? '<p class="text-xs text-green-600 mt-2 font-medium flex items-center"><svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg> File Added</p>' : ''}
-            ${currentUser.profileCompleted ? '' : '<button type="button" onclick="this.closest(\'.prof-child-entry\').remove()" class="absolute -right-3 -top-3 bg-red-100 text-red-600 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold hover:bg-red-200 shadow-sm transition-colors border border-red-200" title="Remove">&times;</button>'}
+        <div class="relative flex items-center justify-end md:pt-6">
+            ${currentUser.profileCompleted ? '' : '<button type="button" onclick="this.closest(\'.prof-child-entry\').remove()" class="bg-red-50 text-red-600 rounded-lg px-4 py-2 text-xs font-bold hover:bg-red-100 transition-all border border-red-100 shadow-sm" title="Remove">Remove Child</button>'}
         </div>
     `;
     container.appendChild(div);
@@ -1434,52 +1431,18 @@ async function handleProfileSave(e) {
             children: []
         };
 
-        // 1. Upload Profile Picture
-        const profilePicInput = document.getElementById('prof-pic-file');
-        if (profilePicInput && profilePicInput.files[0]) {
-            const file = profilePicInput.files[0];
-            const storageRef = ref(storage, `profiles/${currentUser.id}/profile_pic_${Date.now()}`);
-            await uploadBytes(storageRef, file);
-            userData.profilePic = await getDownloadURL(storageRef);
-        }
+        // 1. Skip Image Uploads (Free Plan - No Storage)
+        userData.profilePic = `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.name)}&background=0b3b60&color=fff`;
 
-        // 2. Upload Spouse Picture
-        const spousePicInput = document.getElementById('prof-spouse-pic-file');
-        if (spousePicInput && spousePicInput.files[0]) {
-            const file = spousePicInput.files[0];
-            const storageRef = ref(storage, `profiles/${currentUser.id}/spouse_pic_${Date.now()}`);
-            await uploadBytes(storageRef, file);
-            userData.spouse.pic = await getDownloadURL(storageRef);
-        }
-
-        // 3. Upload Spouse ID
-        const spouseIdInput = document.getElementById('prof-spouse-id');
-        if (spouseIdInput && spouseIdInput.files[0]) {
-            const file = spouseIdInput.files[0];
-            const storageRef = ref(storage, `profiles/${currentUser.id}/spouse_id_${Date.now()}`);
-            await uploadBytes(storageRef, file);
-            userData.spouse.idDoc = await getDownloadURL(storageRef);
-        }
-
-        // 4. Handle Children
+        // 4. Handle Children (Text Only)
         const childEntries = document.querySelectorAll('.prof-child-entry');
         for (const entry of childEntries) {
             const childName = entry.querySelector('.prof-child-name').value;
             const childDob = entry.querySelector('.prof-child-dob').value;
-            const childFileInput = entry.querySelector('.prof-child-file');
-            let childFileUrl = '';
-
-            if (childFileInput && childFileInput.files[0]) {
-                const file = childFileInput.files[0];
-                const storageRef = ref(storage, `profiles/${currentUser.id}/child_${Date.now()}_${childName.replace(/\s+/g, '_')}`);
-                await uploadBytes(storageRef, file);
-                childFileUrl = await getDownloadURL(storageRef);
-            }
 
             userData.children.push({
                 name: childName,
-                dob: childDob,
-                fileUrl: childFileUrl
+                dob: childDob
             });
         }
 
