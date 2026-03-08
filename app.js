@@ -1,9 +1,30 @@
 // =============================================
-//  PHP Backend Configuration
-//  All data comes from the MySQL database
-//  via PHP API files.
+//  Firebase Backend Configuration
+//  Migrated from PHP/PostgreSQL
 // =============================================
-const API_BASE = ''; // Same directory as HTML files
+import { auth, db, storage, firebaseConfig } from './firebase-config.js';
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+import {
+    collection,
+    getDocs,
+    addDoc,
+    updateDoc,
+    deleteDoc,
+    doc,
+    query,
+    where,
+    orderBy,
+    limit,
+    serverTimestamp,
+    onSnapshot
+} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import {
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    signOut,
+    onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
 let currentUser = null;
 let pageId = null;
@@ -11,97 +32,128 @@ let users = [];
 let medicalRequests = [];
 let auditLogs = [];
 
-// Central POST helper - sends FormData to any PHP endpoint
-async function apiPost(endpoint, data = {}) {
-    const form = new FormData();
-    for (const key in data) {
-        form.append(key, data[key]);
-    }
-    const res = await fetch(API_BASE + endpoint, { method: 'POST', body: form });
-    return await res.json();
-}
-
-// Fetch all portal data from get_data.php
-async function refreshData() {
-    try {
-        const res = await fetch(API_BASE + 'get_data.php');
-        const data = await res.json();
-        if (!data.success) { console.warn('Could not load data:', data.message); return; }
-        users = data.users || [];
-        medicalRequests = data.requests || [];
-        auditLogs = data.logs || [];
-    } catch (e) {
-        console.error('Error fetching data from server:', e);
-    }
-}
-
-async function addAuditLog(action, type, details) {
-    try {
-        await apiPost('admin_action.php', {
-            action: 'add_log',
-            log_action: action,
-            target_type: type,
-            details: details,
-            admin_name: currentUser ? currentUser.name : 'System'
-        });
-        // Also update local array immediately for UI
-        auditLogs.unshift({
-            id: Date.now(),
-            action, target_type: type, details,
-            admin_name: currentUser ? currentUser.name : 'System',
-            created_at: new Date().toISOString()
-        });
-    } catch (e) {
-        console.warn('Could not write audit log:', e);
-    }
-}
-
-// DOM Loaded Initialization
-document.addEventListener('DOMContentLoaded', async () => {
-    await refreshData();
-    const sessionUser = sessionStorage.getItem('ecgCurrentUser');
-    pageId = document.body.id;
-
-    if (sessionUser) {
-        const storedUser = JSON.parse(sessionUser);
-
-        // Sync with localStorage to reflect admin changes (like profile locking)
-        if (!storedUser.isAdmin) {
-            const latestUser = users.find(u => u.id === storedUser.id);
-            if (latestUser) {
-                currentUser = latestUser;
-                sessionStorage.setItem('ecgCurrentUser', JSON.stringify(currentUser));
-            } else {
-                currentUser = storedUser;
-            }
-        } else {
-            currentUser = storedUser;
-        }
-
-        // Redirect mapped out for backwards compatibility
-        if (pageId === 'page-auth') {
-            window.location.href = 'dashboard.html';
-        } else {
-            handleAdminNavbar();
-            updateNavbarUser();
-            initPage(pageId);
-        }
-    } else {
-        if (pageId !== 'page-auth') {
-            window.location.href = 'index.html';
-        } else {
-            // Unhide login if on index and logged out
-            document.getElementById('login-form').classList.remove('view-hidden');
-        }
-    }
-});
-
 // Role Constants
 const ROLES = {
     STAFF: 0,
     MANAGER: 1,
     SUPER_ADMIN: 2
 };
+
+// Helper to format timestamps (Firestore or Native JS)
+function formatTimestamp(ts) {
+    if (!ts) return 'N/A';
+    if (ts.seconds) return new Date(ts.seconds * 1000).toLocaleString(); // Firestore
+    if (typeof ts === 'string' || ts instanceof Date) return new Date(ts).toLocaleString();
+    return 'N/A';
+}
+
+function formatDateOnly(ts) {
+    if (!ts) return 'N/A';
+    if (ts.seconds) return new Date(ts.seconds * 1000).toLocaleDateString(); // Firestore
+    if (typeof ts === 'string' || ts instanceof Date) return new Date(ts).toLocaleDateString();
+    return 'N/A';
+}
+
+async function refreshData() {
+    try {
+        // Fetch users
+        const usersSnapshot = await getDocs(collection(db, "users"));
+        users = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        // Fetch medical requests
+        const requestsSnapshot = await getDocs(query(collection(db, "medical_requests"), orderBy("timestamp", "desc")));
+        medicalRequests = requestsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        // Fetch audit logs (last 100)
+        const logsSnapshot = await getDocs(query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(100)));
+        auditLogs = logsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        console.log("Data refreshed from Firestore.");
+    } catch (e) {
+        console.error('Error fetching data from Firestore:', e);
+    }
+}
+
+async function addAuditLog(action, type, details) {
+    try {
+        const logData = {
+            action,
+            target_type: type,
+            details,
+            admin_name: currentUser ? currentUser.name : 'System',
+            timestamp: serverTimestamp()
+        };
+        await addDoc(collection(db, "audit_logs"), logData);
+
+        // Also update local array immediately for UI
+        auditLogs.unshift({
+            id: Date.now(),
+            ...logData,
+            timestamp: new Date().toISOString()
+        });
+    } catch (e) {
+        console.warn('Could not write audit log:', e);
+    }
+}
+
+// Map functions to window object for legacy HTML onclick handlers
+window.logoutUser = logoutUser;
+window.handleLogin = handleLogin;
+window.handleSignup = handleSignup;
+window.toggleAuthForm = toggleAuthForm;
+window.switchAdminTab = switchAdminTab;
+window.filterAdminRequests = filterAdminRequests;
+window.filterAdminUsers = filterAdminUsers;
+window.clearAuditLogs = clearAuditLogs;
+window.adminToggleProfileLock = adminToggleProfileLock;
+window.adminDeleteUser = adminDeleteUser;
+window.viewDetails = viewDetails;
+window.updateRequestStatus = updateRequestStatus;
+window.openAdminRejectModal = openAdminRejectModal;
+window.handleAdminReject = handleAdminReject;
+window.closeAdminRejectModal = closeAdminRejectModal;
+window.handleMedicalRequest = handleMedicalRequest;
+
+// DOM Loaded Initialization
+document.addEventListener('DOMContentLoaded', async () => {
+    pageId = document.body.id;
+
+    // Listen for Auth State Changes
+    onAuthStateChanged(auth, async (firebaseUser) => {
+        if (firebaseUser) {
+            // Get user details from Firestore
+            const userDoc = await getDocs(query(collection(db, "users"), where("email", "==", firebaseUser.email)));
+            if (!userDoc.empty) {
+                const userData = userDoc.docs[0].data();
+                currentUser = {
+                    id: userDoc.docs[0].id,
+                    ...userData,
+                    uid: firebaseUser.uid
+                };
+
+                await refreshData();
+
+                if (pageId === 'page-auth') {
+                    window.location.href = 'dashboard.html';
+                } else {
+                    handleAdminNavbar();
+                    updateNavbarUser();
+                    initPage(pageId);
+                }
+            } else {
+                // User exists in Auth but not in Firestore? This shouldn't happen.
+                await signOut(auth);
+                window.location.href = 'index.html';
+            }
+        } else {
+            if (pageId !== 'page-auth') {
+                window.location.href = 'index.html';
+            } else {
+                document.getElementById('login-form').classList.remove('view-hidden');
+            }
+        }
+    });
+});
 
 // File uploads are now handled server-side by save_profile.php
 // The uploadFile function is no longer needed.
@@ -162,7 +214,7 @@ function renderAdminDashboard() {
             </div>
             <div class="flex-1">
                 <p class="text-xs font-bold text-gray-900">${staff ? staff.name : 'Unknown Staff'} submitted a request</p>
-                <p class="text-[10px] text-gray-500">${new Date(req.timestamp).toLocaleString()}</p>
+                <p class="text-[10px] text-gray-500">${formatTimestamp(req.timestamp)}</p>
             </div>
             <span class="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-bold">${req.status}</span>
         `;
@@ -220,7 +272,7 @@ function renderAdminRequests(filtered = null) {
         const statusClass = getStatusClass(req.status);
 
         tr.innerHTML = `
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${new Date(req.timestamp).toLocaleDateString()}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatDateOnly(req.timestamp)}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-ecgBlue">${staff ? staff.staffId : 'Unknown'}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${req.hospital}</td>
             <td class="px-6 py-4 whitespace-nowrap"><span class="px-2 py-1 text-xs font-bold rounded-full border ${statusClass}">${req.status}</span></td>
@@ -297,37 +349,6 @@ function renderAdminUsers(filtered = null) {
     });
 }
 
-async function updateRequestStatus(reqId, status, reason = '') {
-    try {
-        const data = await apiPost('admin_action.php', {
-            action: 'update_status',
-            req_id: reqId,
-            status,
-            reason
-        });
-        if (!data.success) throw new Error(data.message);
-
-        // Update local state for immediate UI refresh
-        const idx = medicalRequests.findIndex(r => r.id == reqId);
-        if (idx !== -1) {
-            medicalRequests[idx].status = status;
-            if (reason) medicalRequests[idx].rejectionReason = reason;
-        }
-
-        const req = medicalRequests.find(r => r.id == reqId);
-        const staff = users.find(u => u.id == req?.userId);
-        await addAuditLog(
-            status === 'Approved' ? 'Approved Request' : 'Rejected Request',
-            'Medical Request',
-            `${status} request #${reqId} for ${staff ? staff.name : 'Unknown'}${reason ? '. Reason: ' + reason : ''}`
-        );
-        setupAdmin();
-    } catch (error) {
-        console.error('Update Status Error:', error);
-        alert('Failed to update request status: ' + error.message);
-    }
-}
-
 function openAdminRejectModal(reqId) {
     document.getElementById('reject-req-id').value = reqId;
     document.getElementById('reject-modal').classList.remove('view-hidden');
@@ -346,21 +367,45 @@ function handleAdminReject(e) {
     closeAdminRejectModal();
 }
 
+async function updateRequestStatus(reqId, status, reason = '') {
+    try {
+        const reqRef = doc(db, "medical_requests", reqId);
+        const updateData = { status };
+        if (reason) updateData.rejection_reason = reason;
+
+        await updateDoc(reqRef, updateData);
+
+        // Update local state for immediate UI refresh
+        const idx = medicalRequests.findIndex(r => r.id == reqId);
+        if (idx !== -1) {
+            medicalRequests[idx].status = status;
+            if (reason) medicalRequests[idx].rejection_reason = reason;
+        }
+
+        const req = medicalRequests.find(r => r.id == reqId);
+        const staff = users.find(u => u.id == req?.userId);
+
+        await addAuditLog(
+            status === 'Approved' ? 'Approved Request' : 'Rejected Request',
+            'Medical Request',
+            `${status} request #${reqId} for ${staff ? staff.name : 'Unknown'}${reason ? '. Reason: ' + reason : ''}`
+        );
+        setupAdmin();
+    } catch (error) {
+        console.error('Update Status Error:', error);
+        alert('Failed to update request status: ' + error.message);
+    }
+}
+
 async function adminToggleProfileLock(userId) {
-    const userIdx = users.findIndex(u => u.id == userId);
-    if (userIdx === -1) return;
-    const user = users[userIdx];
-    const newStatus = user.profileCompleted ? 0 : 1;
+    const user = users.find(u => u.id == userId);
+    if (!user) return;
+    const newStatus = user.profileCompleted ? false : true;
 
     try {
-        const data = await apiPost('admin_action.php', {
-            action: 'toggle_lock',
-            user_id: userId,
-            new_status: newStatus
-        });
-        if (!data.success) throw new Error(data.message);
+        await updateDoc(doc(db, "users", userId), { profileCompleted: newStatus });
 
-        user.profileCompleted = !!newStatus;
+        user.profileCompleted = newStatus;
         await addAuditLog(
             newStatus ? 'Locked Profile' : 'Unlocked Profile',
             'Staff Member',
@@ -381,11 +426,14 @@ async function adminDeleteUser(userId) {
     if (!confirm(`Are you sure you want to PERMANENTLY delete staff member:\n${user.name} (${user.staffId})?\n\nAll their medical requests will also be deleted. This cannot be undone.`)) return;
 
     try {
-        const data = await apiPost('admin_action.php', {
-            action: 'delete_user',
-            user_id: userId
-        });
-        if (!data.success) throw new Error(data.message);
+        // 1. Delete user document
+        await deleteDoc(doc(db, "users", userId));
+
+        // 2. Delete all medical requests for this user
+        const q = query(collection(db, "medical_requests"), where("userId", "==", userId));
+        const snapshots = await getDocs(q);
+        const deletePromises = snapshots.docs.map(d => deleteDoc(doc(db, "medical_requests", d.id)));
+        await Promise.all(deletePromises);
 
         await addAuditLog('Deleted Staff', 'Staff Member',
             `Permanently deleted ${user.name} (${user.staffId}) and all associated records.`);
@@ -519,15 +567,27 @@ async function handleSignup(e) {
     }
 
     try {
-        const data = await apiPost('signup.php', {
-            name, staff_id: staffId, email, password: pwd, dept, phone
+        // 1. Create Auth Account
+        const userCredential = await createUserWithEmailAndPassword(auth, email, pwd);
+        const user = userCredential.user;
+
+        // 2. Create Firestore Profile
+        const role = (dept === 'IT') ? ROLES.SUPER_ADMIN : ROLES.STAFF;
+        await addDoc(collection(db, "users"), {
+            name,
+            staffId,
+            email,
+            dept,
+            phone,
+            role,
+            profileCompleted: false,
+            created_at: serverTimestamp()
         });
-        if (!data.success) throw new Error(data.message);
-        await completeLogin(data.user, true);
+
+        // Redirect handled by onAuthStateChanged
     } catch (error) {
         console.error('Signup Error:', error);
         showError(errorDiv, error.message || 'Registration failed. Please try again.');
-    } finally {
         btn.disabled = false;
         btn.textContent = originalText;
     }
@@ -544,72 +604,75 @@ async function handleLogin(e) {
     const errorDiv = document.getElementById('login-error');
     errorDiv.classList.add('hidden');
 
-    const staffIdInput = document.getElementById('login-id').value.trim();
+    const emailInput = document.getElementById('login-email').value.trim();
     const pwd = document.getElementById('login-pwd').value;
 
+    if (!validateEcgEmail(emailInput)) {
+        showError(errorDiv, 'Only official ECG emails (@ecggh.com) are allowed.');
+        btn.disabled = false; btn.textContent = originalText;
+        return;
+    }
+
     try {
-        const data = await apiPost('login.php', {
-            staff_id: staffIdInput,
-            password: pwd
-        });
-        if (!data.success) throw new Error(data.message);
-        await completeLogin(data.user);
+        // Sign in with Firebase Auth directly
+        await signInWithEmailAndPassword(auth, emailInput, pwd);
+        // Redirect handled by onAuthStateChanged
     } catch (error) {
         console.error('Login Error:', error);
-        showError(errorDiv, error.message || 'Invalid Staff ID or Password.');
-    } finally {
+        let msg = 'Invalid Email or Password.';
+        if (error.code === 'auth/user-not-found') msg = 'No account found with this email.';
+        if (error.code === 'auth/wrong-password') msg = 'Incorrect password.';
+        showError(errorDiv, msg);
         btn.disabled = false;
         btn.textContent = originalText;
     }
 }
 
-async function completeLogin(user, fromSignup = false) {
-    // PHP already normalizes fields, just store as-is
-    const sessionUser = {
-        ...user,
-        staffId: user.staffId || user.staff_id,
-        profileCompleted: user.profileCompleted ?? user.profile_completed ?? false,
-        isAdmin: user.isAdmin || (user.role >= 1)
-    };
-    sessionStorage.setItem('ecgCurrentUser', JSON.stringify(sessionUser));
-    if (fromSignup) {
-        window.location.href = 'profile.html';
-    } else {
-        window.location.href = 'dashboard.html';
-    }
-}
-
 async function logoutUser() {
-    try { await fetch('logout.php'); } catch (e) { }
-    sessionStorage.removeItem('ecgCurrentUser');
-    window.location.href = 'index.html';
+    try {
+        await signOut(auth);
+        window.location.href = 'index.html';
+    } catch (e) {
+        console.error("Logout error:", e);
+    }
 }
 
 let resetUserId = null;
 
-function handleForgotPassword(e) {
+async function handleForgotPassword(e) {
     e.preventDefault();
     const errorDiv = document.getElementById('forgot-error');
     const successDiv = document.getElementById('forgot-success');
     errorDiv.classList.add('hidden');
     successDiv.classList.add('hidden');
 
-    const staffId = document.getElementById('forgot-id').value;
-    const email = document.getElementById('forgot-email').value;
+    const staffId = document.getElementById('forgot-id').value.trim();
+    const email = document.getElementById('forgot-email').value.trim().toLowerCase();
 
-    const user = users.find(u => u.staffId === staffId && u.email.toLowerCase() === email.toLowerCase());
-
-    if (!user) {
-        showError(errorDiv, 'No account found with these details.');
+    if (!validateEcgEmail(email)) {
+        showError(errorDiv, 'Please enter a valid ECG official email (@ecggh.com).');
         return;
     }
 
-    resetUserId = user.id;
-    showSuccess(successDiv, 'Identity Verified. Proceeding to reset password...');
+    try {
+        const q = query(collection(db, "users"), where("staffId", "==", staffId), where("email", "==", email));
+        const snap = await getDocs(q);
 
-    setTimeout(() => {
-        toggleAuthForm('reset');
-    }, 1500);
+        if (!snap.empty) {
+            // Check if Firebase Auth has the sendPasswordResetEmail method imported, else import it
+            const { getAuth, sendPasswordResetEmail } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js");
+            await sendPasswordResetEmail(auth, email);
+
+            successDiv.innerHTML = `<div class="font-bold text-green-700">Reset Link Sent!</div>Please check your ECG inbox (${email}) for instructions.`;
+            successDiv.classList.remove('hidden');
+            e.target.reset();
+        } else {
+            showError(errorDiv, 'Staff ID and Email do not match our records.');
+        }
+    } catch (err) {
+        console.error(err);
+        showError(errorDiv, 'Failed to process request: ' + err.message);
+    }
 }
 
 function handleResetPassword(e) {
@@ -781,7 +844,7 @@ function renderAdminAuditLogs() {
             </div>
             <div class="text-right">
                 <p class="text-xs font-bold text-gray-900">${log.admin_name || log.adminName}</p>
-                <p class="text-[10px] text-gray-400">${new Date(log.created_at || log.timestamp).toLocaleString()}</p>
+                <p class="text-[10px] text-gray-400">${formatTimestamp(log.created_at || log.timestamp)}</p>
             </div>
         `;
         logContainer.appendChild(div);
@@ -790,13 +853,26 @@ function renderAdminAuditLogs() {
 
 async function clearAuditLogs() {
     if (!confirm('Are you sure you want to clear all system audit logs? This action is permanent.')) return;
+    const btn = document.querySelector('button[onclick="clearAuditLogs()"]');
+    const originalText = btn ? btn.textContent : '';
+    if (btn) btn.textContent = 'Clearing...';
+
     try {
-        const data = await apiPost('admin_action.php', { action: 'clear_logs' });
-        if (!data.success) throw new Error(data.message);
+        // Firestore doesn't have a truncate, so we delete each doc
+        const q = query(collection(db, "audit_logs"));
+        const snapshot = await getDocs(q);
+
+        const deletePromises = snapshot.docs.map(d => deleteDoc(doc(db, "audit_logs", d.id)));
+        await Promise.all(deletePromises);
+
         auditLogs = [];
         renderAdminAuditLogs();
+        alert('Audit logs cleared successfully.');
     } catch (e) {
+        console.error('Clear Logs Error:', e);
         alert('Failed to clear logs: ' + e.message);
+    } finally {
+        if (btn) btn.textContent = originalText;
     }
 }
 
@@ -822,11 +898,29 @@ async function handleAdminAddUser(e) {
     const pwd = document.getElementById('add-staff-pwd').value;
 
     try {
-        const data = await apiPost('admin_action.php', {
-            action: 'add_user',
-            name, staff_id: staffId, dept, email, password: pwd
+        // To create a user without signing out the current admin, we use a secondary app instance
+        const secondaryApp = initializeApp(firebaseConfig, 'secondary');
+        const { getAuth, createUserWithEmailAndPassword, signOut: secondarySignOut } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js");
+        const secondaryAuth = getAuth(secondaryApp);
+
+        // 1. Create Auth Account
+        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, pwd);
+        const newUid = userCredential.user.uid;
+
+        // 2. Create Firestore Profile
+        const role = (dept === 'IT') ? ROLES.SUPER_ADMIN : ROLES.STAFF;
+        await addDoc(collection(db, "users"), {
+            name,
+            staffId,
+            email,
+            dept,
+            role,
+            profileCompleted: false,
+            created_at: serverTimestamp()
         });
-        if (!data.success) throw new Error(data.message);
+
+        // 3. Clean up secondary auth session
+        await secondarySignOut(secondaryAuth);
 
         await addAuditLog('Created Staff Account', 'System Admin',
             `Manually created account for ${name} (${staffId}) in ${dept} department.`);
@@ -947,12 +1041,9 @@ async function adminUpdateUserRole(userId, newRole) {
     const newRoleName = Object.keys(ROLES).find(key => ROLES[key] === parseInt(newRole));
 
     try {
-        const data = await apiPost('admin_action.php', {
-            action: 'update_role',
-            user_id: userId,
-            new_role: parseInt(newRole)
-        });
-        if (!data.success) throw new Error(data.message);
+        // Update directly in Firestore
+        const userRef = doc(db, "users", userId);
+        await updateDoc(userRef, { role: parseInt(newRole) });
 
         user.role = parseInt(newRole);
         await addAuditLog('Updated User Role', 'System Admin',
@@ -1039,14 +1130,18 @@ async function handleMedicalRequest(e) {
     const hospital = document.getElementById('req-hospital').value;
 
     try {
-        const data = await apiPost('submit_request.php', {
-            purpose, hospital,
-            request_date: dateInput,
-            patient_type: type,
-            patient_name: patientName
+        const docRef = await addDoc(collection(db, "medical_requests"), {
+            userId: currentUser.id,
+            purpose,
+            hospital,
+            targetDate: dateInput,
+            patientType: type,
+            patientName: patientName,
+            status: 'Pending',
+            timestamp: serverTimestamp()
         });
-        if (!data.success) throw new Error(data.message);
-        alert(`Medical Request Submitted Successfully!\nRequest ID: REQ-${data.id}`);
+
+        alert(`Medical Request Submitted Successfully!\nRequest ID: ${docRef.id}`);
         window.location.href = 'history.html';
     } catch (error) {
         console.error('Request Error:', error);
@@ -1067,14 +1162,17 @@ async function renderHistory() {
 
     tbody.innerHTML = '';
 
-    let userRequests = [];
-
-    // Use local array fetched from PHP backend
-    userRequests = medicalRequests.filter(r => r.userId == currentUser.id);
+    let userRequests = medicalRequests.filter(r => r.userId === currentUser.id);
     if (filter !== 'All') {
         userRequests = userRequests.filter(r => r.status === filter);
     }
-    userRequests.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // Sort by timestamp (handling serverTimestamp which might be an object)
+    userRequests.sort((a, b) => {
+        const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : new Date(a.timestamp).getTime();
+        const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : new Date(b.timestamp).getTime();
+        return tB - tA;
+    });
 
     if (userRequests.length === 0) {
         emptyDiv.classList.remove('view-hidden');
@@ -1082,44 +1180,40 @@ async function renderHistory() {
     } else {
         emptyDiv.classList.add('view-hidden');
         tbody.parentElement.classList.remove('hidden');
-
         userRequests.forEach(req => {
-            const dateStr = new Date(req.timestamp).toLocaleDateString();
             const tr = document.createElement('tr');
-
-            let statusColor = 'bg-yellow-50 text-yellow-700 border-yellow-200';
-            if (req.status === 'Approved') statusColor = 'bg-green-50 text-green-700 border-green-200';
-            if (req.status === 'Rejected') statusColor = 'bg-red-50 text-red-700 border-red-200';
-
-            tr.className = 'hover:bg-blue-50/50 transition-colors duration-200';
             tr.innerHTML = `
-        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${dateStr}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-semibold">${req.dependantName} <span class="text-xs text-gray-500 font-normal ml-1 bg-gray-100 px-2 py-0.5 rounded-full">(${req.dependantType})</span></td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${req.hospital}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm">
-                    <span class="px-3 py-1 inline-flex text-xs leading-5 font-bold rounded-full border shadow-sm tag-status cursor-default ${statusColor}">
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 font-display">REQ-${req.id.substring(0, 6)}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-medium">${req.hospital}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-medium">${req.targetDate}</td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="px-2.5 py-1 text-xs font-bold rounded-lg shadow-sm ${getStatusClass(req.status)}">
                         ${req.status}
                     </span>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button onclick="viewDetails('${req.id}')" class="text-ecgBlue hover:text-white hover:bg-ecgBlue bg-blue-50 px-4 py-1.5 rounded-lg border border-blue-100 shadow-sm transition-all duration-200">View</button>
+                    <button onclick="viewDetails('${req.id}')" class="text-ecgBlue hover:text-ecgBlueDark font-bold flex items-center justify-end ml-auto group">
+                        Details 
+                        <svg class="w-4 h-4 ml-1 transform group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                    </button>
                 </td>
-    `;
+            `;
             tbody.appendChild(tr);
         });
     }
 }
 
-async function viewDetails(reqId) {
-    let req = medicalRequests.find(r => r.id == reqId);
+function viewDetails(reqId) {
+    const req = medicalRequests.find(r => r.id === reqId);
     if (!req) return;
 
     const staff = users.find(u => u.id === req.userId);
 
-    document.getElementById('modal-id').textContent = `Req ID: #${req.id}`;
+    document.getElementById('modal-id').textContent = `Req ID: #${req.id.substring(0, 8).toUpperCase()}`;
+
     let content = `
         <div class="grid grid-cols-2 gap-y-6 gap-x-4">
-            <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Submitted On</strong> <span class="text-gray-900 font-medium">${new Date(req.timestamp).toLocaleString()}</span></div>
+            <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Submitted On</strong> <span class="text-gray-900 font-medium">${formatTimestamp(req.timestamp)}</span></div>
             <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Status</strong> <span class="font-bold border px-3 py-1 rounded-full text-xs inline-block shadow-sm ${getStatusClass(req.status)}">${req.status}</span></div>
             
             ${pageId === 'page-admin' ? `
@@ -1127,33 +1221,34 @@ async function viewDetails(reqId) {
                 <strong class="text-xs font-bold text-blue-600 uppercase tracking-wider block mb-1">Staff Member</strong> 
                 <span class="text-gray-900 font-bold text-base">${staff ? staff.name : 'Unknown Staff'} <span class="text-xs text-gray-500 font-normal ml-1">(${staff ? staff.staffId : 'N/A'})</span></span>
             </div>
-            ` : ''
-        }
+            ` : ''}
 
-            <div class="col-span-2 bg-gray-50/50 p-4 rounded-xl border border-gray-100"><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-2">Purpose</strong> <span class="text-gray-800 leading-relaxed">${req.purpose}</span></div>
+            <div class="col-span-2 bg-gray-50/50 p-4 rounded-xl border border-gray-100">
+                <strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-2">Purpose</strong> 
+                <span class="text-gray-800 leading-relaxed">${req.purpose}</span>
+            </div>
             <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Hospital</strong> <span class="text-gray-900 font-medium">${req.hospital}</span></div>
             <div><strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Target Date</strong> <span class="text-gray-900 font-medium">${req.targetDate}</span></div>
             
             <div class="col-span-2 pt-4 border-t border-gray-100 mt-2">
                 <strong class="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Primary Patient</strong> 
-                <span class="text-gray-900 font-bold text-base">${req.dependantName} <span class="text-sm font-normal text-gray-500 ml-1 bg-gray-100 px-2 py-0.5 rounded-full">(${req.dependantType})</span></span>
+                <span class="text-gray-900 font-bold text-base">${req.patientName} <span class="text-sm font-normal text-gray-500 ml-1 bg-gray-100 px-2 py-0.5 rounded-full">(${req.patientType})</span></span>
             </div>
         </div>
+    `;
+
+    if (req.status === 'Rejected' && req.rejection_reason) {
+        content += `
+            <div class="mt-4 p-4 bg-red-50/80 border border-red-200 rounded-xl text-red-800">
+                <strong class="font-bold flex items-center mb-1">
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Rejection Reason
+                </strong>
+                <p class="text-sm mt-1 ml-5.5 text-red-700">${req.rejection_reason}</p>
+            </div>
         `;
-
-    // Show extra details for dependants
-    if (req.dependantType === 'Spouse') {
-        content += `<div class="mt-4 p-4 bg-blue-50/50 border border-blue-100 rounded-xl"><strong class="text-sm font-bold text-ecgBlue block mb-2 flex items-center"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>Spouse Details</strong> <div class="grid grid-cols-2 gap-2 text-sm text-gray-700"><div>Name: <span class="font-medium text-gray-900">${req.spouseName || req.dependantName}</span></div><div>DOB: <span class="font-medium text-gray-900">${req.spouseDob || 'N/A'}</span></div></div></div>`;
-    } else if (req.dependantType === 'Child' && req.children) {
-        content += `<div class="mt-4 p-4 bg-yellow-50/50 border border-yellow-100 rounded-xl"><strong class="text-sm font-bold text-yellow-700 block mb-3 flex items-center"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>Children Details</strong><div class="space-y-3">`;
-        req.children.forEach(c => {
-            content += `<div class="bg-white p-3 rounded-lg border border-yellow-200/50 shadow-sm text-sm"><div class="font-bold text-gray-900">${c.name}</div><div class="text-gray-600 mt-1">Born: ${c.dob}</div></div>`;
-        });
-        content += `</div></div>`;
-    }
-
-    if (req.status === 'Rejected' && req.rejectionReason) {
-        content += `<div class="mt-4 p-4 bg-red-50/80 border border-red-200 rounded-xl text-red-800"><strong class="font-bold flex items-center mb-1"><svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>Rejection Reason</strong><p class="text-sm mt-1 ml-5.5 text-red-700">${req.rejectionReason}</p></div>`;
     }
 
     document.getElementById('modal-content').innerHTML = content;
@@ -1171,32 +1266,19 @@ function closeModal() {
 }
 
 // Profile Handling Methods
-let tempProfilePicBase64 = null;
-let tempSpousePicBase64 = null;
-
 function previewProfilePic(e) {
     const file = e.target.files[0];
     if (file) {
-        const reader = new FileReader();
-        reader.onload = function (event) {
-            tempProfilePicBase64 = event.target.result;
-            const previewEl = document.getElementById('prof-pic-preview');
-            if (previewEl) previewEl.src = tempProfilePicBase64;
-        };
-        reader.readAsDataURL(file);
+        const previewEl = document.getElementById('prof-pic-preview');
+        if (previewEl) previewEl.src = URL.createObjectURL(file);
     }
 }
 
 function previewSpousePic(e) {
     const file = e.target.files[0];
     if (file) {
-        const reader = new FileReader();
-        reader.onload = function (event) {
-            tempSpousePicBase64 = event.target.result;
-            const previewEl = document.getElementById('prof-spouse-pic-preview');
-            if (previewEl) previewEl.src = tempSpousePicBase64;
-        };
-        reader.readAsDataURL(file);
+        const previewEl = document.getElementById('prof-spouse-pic-preview');
+        if (previewEl) previewEl.src = URL.createObjectURL(file);
     }
 }
 
@@ -1334,57 +1416,80 @@ async function handleProfileSave(e) {
     btn.textContent = 'Saving Profile...';
 
     try {
-        // Build FormData to support file uploads
-        const form = new FormData();
+        const userData = {
+            name: document.getElementById('prof-staff-name').value,
+            phone: document.getElementById('prof-staff-phone').value,
+            dob: document.getElementById('prof-staff-dob').value,
+            designation: document.getElementById('prof-staff-designation').value,
+            region: document.getElementById('prof-staff-region').value,
+            district: document.getElementById('prof-staff-district').value,
+            profileCompleted: true,
+            spouse: {
+                name: document.getElementById('prof-spouse-name').value,
+                dob: document.getElementById('prof-spouse-dob').value,
+                phone: document.getElementById('prof-spouse-phone').value,
+                idType: document.getElementById('prof-spouse-idtype').value,
+                idNumber: document.getElementById('prof-spouse-idnumber').value
+            },
+            children: []
+        };
 
-        // Text fields
-        form.append('name', document.getElementById('prof-staff-name').value);
-        form.append('phone', document.getElementById('prof-staff-phone').value);
-        form.append('dob', document.getElementById('prof-staff-dob').value);
-        form.append('designation', document.getElementById('prof-staff-designation').value);
-        form.append('region', document.getElementById('prof-staff-region').value);
-        form.append('district', document.getElementById('prof-staff-district').value);
-
-        // Spouse fields
-        form.append('spouse_name', document.getElementById('prof-spouse-name').value);
-        form.append('spouse_dob', document.getElementById('prof-spouse-dob').value);
-        form.append('spouse_phone', document.getElementById('prof-spouse-phone').value);
-        form.append('spouse_idtype', document.getElementById('prof-spouse-idtype').value);
-        form.append('spouse_idnumber', document.getElementById('prof-spouse-idnumber').value);
-
-        // Children
-        const childEntries = document.querySelectorAll('.prof-child-entry');
-        childEntries.forEach(entry => {
-            form.append('child_name[]', entry.querySelector('.prof-child-name').value);
-            form.append('child_dob[]', entry.querySelector('.prof-child-dob').value);
-        });
-
-        // Profile picture file
+        // 1. Upload Profile Picture
         const profilePicInput = document.getElementById('prof-pic-file');
         if (profilePicInput && profilePicInput.files[0]) {
-            form.append('profile_pic', profilePicInput.files[0]);
+            const file = profilePicInput.files[0];
+            const storageRef = ref(storage, `profiles/${currentUser.id}/profile_pic_${Date.now()}`);
+            await uploadBytes(storageRef, file);
+            userData.profilePic = await getDownloadURL(storageRef);
         }
 
-        // Spouse picture file
+        // 2. Upload Spouse Picture
         const spousePicInput = document.getElementById('prof-spouse-pic-file');
         if (spousePicInput && spousePicInput.files[0]) {
-            form.append('spouse_pic', spousePicInput.files[0]);
+            const file = spousePicInput.files[0];
+            const storageRef = ref(storage, `profiles/${currentUser.id}/spouse_pic_${Date.now()}`);
+            await uploadBytes(storageRef, file);
+            userData.spouse.pic = await getDownloadURL(storageRef);
         }
 
-        // Spouse ID document
+        // 3. Upload Spouse ID
         const spouseIdInput = document.getElementById('prof-spouse-id');
         if (spouseIdInput && spouseIdInput.files[0]) {
-            form.append('spouse_id', spouseIdInput.files[0]);
+            const file = spouseIdInput.files[0];
+            const storageRef = ref(storage, `profiles/${currentUser.id}/spouse_id_${Date.now()}`);
+            await uploadBytes(storageRef, file);
+            userData.spouse.idDoc = await getDownloadURL(storageRef);
         }
 
-        const res = await fetch('save_profile.php', { method: 'POST', body: form });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.message);
+        // 4. Handle Children
+        const childEntries = document.querySelectorAll('.prof-child-entry');
+        for (const entry of childEntries) {
+            const childName = entry.querySelector('.prof-child-name').value;
+            const childDob = entry.querySelector('.prof-child-dob').value;
+            const childFileInput = entry.querySelector('.prof-child-file');
+            let childFileUrl = '';
 
-        // Update local session with fresh data from server
-        Object.assign(currentUser, data.user);
-        currentUser.profileCompleted = true;
-        sessionStorage.setItem('ecgCurrentUser', JSON.stringify(currentUser));
+            if (childFileInput && childFileInput.files[0]) {
+                const file = childFileInput.files[0];
+                const storageRef = ref(storage, `profiles/${currentUser.id}/child_${Date.now()}_${childName.replace(/\s+/g, '_')}`);
+                await uploadBytes(storageRef, file);
+                childFileUrl = await getDownloadURL(storageRef);
+            }
+
+            userData.children.push({
+                name: childName,
+                dob: childDob,
+                fileUrl: childFileUrl
+            });
+        }
+
+        // 5. Update Firestore
+        await updateDoc(doc(db, "users", currentUser.id), userData);
+
+        // Update local state
+        Object.assign(currentUser, userData);
+
+        await addAuditLog('Completed Profile', 'Profile', `Staff member ${currentUser.name} completed and locked their profile.`);
 
         alert('Profile saved successfully! Your profile is now locked for verification.');
         window.location.href = 'dashboard.html';
@@ -1416,7 +1521,7 @@ async function exportToCSV() {
             req.hospital,
             req.targetDate,
             req.status,
-            new Date(req.timestamp).toLocaleString()
+            formatTimestamp(req.timestamp)
         ];
     });
 
@@ -1476,7 +1581,7 @@ function generatePDFReport() {
     const tableData = medicalRequests.map(req => {
         const staff = users.find(u => u.id === req.userId);
         return [
-            new Date(req.timestamp).toLocaleDateString(),
+            formatDateOnly(req.timestamp),
             staff ? staff.staffId : 'N/A',
             req.hospital,
             req.status
