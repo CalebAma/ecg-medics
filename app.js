@@ -1621,7 +1621,19 @@ const REGIONAL_DISTRICTS = {
     ],
     "Volta": [
         { districts: ["Ho District Office", "Kpando District Office", "Akatsi District Office", "Sogakope District Office", "Keta District Office"] }
-    ]
+    ],
+    "Eastern": [{ districts: ["Regional Office", "Koforidua District"] }],
+    "Western": [{ districts: ["Regional Office", "Takoradi District"] }],
+    "Western North": [{ districts: ["Regional Office", "Sefwi Wiawso District"] }],
+    "Northern": [{ districts: ["Regional Office", "Tamale District"] }],
+    "North East": [{ districts: ["Regional Office", "Nalerigu District"] }],
+    "Savannah": [{ districts: ["Regional Office", "Damongo District"] }],
+    "Upper East": [{ districts: ["Regional Office", "Bolgatanga District"] }],
+    "Upper West": [{ districts: ["Regional Office", "Wa District"] }],
+    "Oti": [{ districts: ["Regional Office", "Dambai District"] }],
+    "Bono": [{ districts: ["Regional Office", "Sunyani District"] }],
+    "Bono East": [{ districts: ["Regional Office", "Techiman District"] }],
+    "Ahafo": [{ districts: ["Regional Office", "Goaso District"] }]
 };
 
 function updateDistrictOptions(selectedDistrict = "") {
