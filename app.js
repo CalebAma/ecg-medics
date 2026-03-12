@@ -1363,7 +1363,7 @@ async function renderHistory() {
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
                     <button onclick="viewDetails('${req.id}')" class="text-ecgBlue hover:text-ecgBlueDark font-bold inline-flex items-center group">
-                        Details 
+                        View Details 
                         <svg class="w-4 h-4 ml-1 transform group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
                     </button>
                     ${req.status === 'Approved' ? `
