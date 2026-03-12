@@ -415,14 +415,20 @@ function renderAdminDashboard() {
 
     // Animate Charts
     setTimeout(() => {
+        const pendingCount = medicalRequests.filter(r => r.status === 'Pending').length;
+        const approvedCount = medicalRequests.filter(r => r.status === 'Approved').length;
+        const rejectedCount = medicalRequests.filter(r => r.status === 'Rejected').length;
         const total = medicalRequests.length || 1;
-        const pending = (medicalRequests.filter(r => r.status === 'Pending').length / total) * 100;
-        const approved = (medicalRequests.filter(r => r.status === 'Approved').length / total) * 100;
-        const rejected = (medicalRequests.filter(r => r.status === 'Rejected').length / total) * 100;
 
-        document.getElementById('chart-bar-pending').style.height = `${pending}%`;
-        document.getElementById('chart-bar-approved').style.height = `${approved}%`;
-        document.getElementById('chart-bar-rejected').style.height = `${rejected}%`;
+        // Update counts
+        if (document.getElementById('chart-count-pending')) document.getElementById('chart-count-pending').textContent = pendingCount;
+        if (document.getElementById('chart-count-approved')) document.getElementById('chart-count-approved').textContent = approvedCount;
+        if (document.getElementById('chart-count-rejected')) document.getElementById('chart-count-rejected').textContent = rejectedCount;
+
+        // Update bar heights (percentage of total)
+        if (document.getElementById('chart-bar-pending')) document.getElementById('chart-bar-pending').style.height = `${(pendingCount / total) * 100}%`;
+        if (document.getElementById('chart-bar-approved')) document.getElementById('chart-bar-approved').style.height = `${(approvedCount / total) * 100}%`;
+        if (document.getElementById('chart-bar-rejected')) document.getElementById('chart-bar-rejected').style.height = `${(rejectedCount / total) * 100}%`;
     }, 100);
 }
 
