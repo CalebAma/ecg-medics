@@ -107,8 +107,8 @@ async function refreshData() {
             getDocs(query(collection(db, 'medical_requests'), orderBy('timestamp', 'desc')))
         ];
 
-        // Only fetch audit logs for managers/admins
-        if (currentUser.role >= ROLES.MANAGER) {
+        // Only fetch audit logs for super admins
+        if (currentUser.role === ROLES.SUPER_ADMIN) {
             fetchPromises.push(
                 getDocs(query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(100)))
             );
@@ -122,6 +122,11 @@ async function refreshData() {
 
     } catch (e) {
         console.error('Error fetching data from Firestore:', e);
+        // If it's a permission error, it might be because the user's role hasn't propagated yet
+        if (e.code === 'permission-denied') {
+            console.warn('Permission denied. Retrying in 2 seconds...');
+            setTimeout(refreshData, 2000);
+        }
     }
 }
 
@@ -256,6 +261,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             } else {
                 // User exists in Auth but not in Firestore — sign them out
+                hidePageLoader();
                 await signOut(auth);
                 window.location.href = 'index.html';
             }
@@ -321,7 +327,15 @@ function setupAdmin() {
     renderAdminDashboard();
     renderAdminRequests();
     renderAdminUsers();
-    renderAdminAuditLogs();
+    if (currentUser.role === ROLES.SUPER_ADMIN) {
+        renderAdminAuditLogs();
+    } else {
+        const sideTabLogs = document.getElementById('side-tab-logs');
+        if (sideTabLogs) sideTabLogs.classList.add('hidden');
+        
+        const clearBtn = document.querySelector('button[onclick="clearAuditLogs()"]');
+        if (clearBtn) clearBtn.classList.add('hidden');
+    }
     switchAdminTab('overview'); // Ensure this is called last to highlight the correct tab
 }
 
@@ -339,44 +353,64 @@ function renderAdminDashboard() {
 
     activityList.innerHTML = '';
 
-    // Combine some recent events
-    const recentRequests = [...medicalRequests].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 3);
-    const recentUsers = [...users].reverse().slice(0, 2);
+    // Combine and sort recent activities
+    const combinedActivity = [
+        ...medicalRequests.map(r => ({ ...r, type: 'request' })),
+        ...users.map(u => ({ ...u, type: 'user' }))
+    ].sort((a, b) => {
+        const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : new Date(a.timestamp || 0).getTime();
+        const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : new Date(b.timestamp || 0).getTime();
+        return timeB - timeA;
+    }).slice(0, 5);
 
-    if (recentRequests.length === 0 && recentUsers.length === 0) {
+    if (combinedActivity.length === 0) {
         activityList.innerHTML = '<p class="text-xs text-gray-400 italic">No recent activity detected.</p>';
+        return;
     }
 
-    recentRequests.forEach(req => {
-        const staff = users.find(u => u.id === req.userId);
-        const div = document.createElement('div');
-        div.className = 'flex items-center p-3 bg-white rounded-xl border border-gray-100 shadow-sm';
-        div.innerHTML = `
-            <div class="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-ecgBlue mr-3">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
-            </div>
-            <div class="flex-1">
-                <p class="text-xs font-bold text-gray-900">${staff ? staff.name : 'Unknown Staff'} submitted a request</p>
-                <p class="text-[10px] text-gray-500">${formatTimestamp(req.timestamp)}</p>
-            </div>
-            <span class="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-bold">${req.status}</span>
-        `;
-        activityList.appendChild(div);
-    });
-
-    recentUsers.forEach(user => {
-        const div = document.createElement('div');
-        div.className = 'flex items-center p-3 bg-white rounded-xl border border-gray-100 shadow-sm';
-        div.innerHTML = `
-            <div class="h-8 w-8 rounded-full bg-green-100 flex items-center justify-center text-green-600 mr-3">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
-            </div>
-            <div class="flex-1">
-                <p class="text-xs font-bold text-gray-900">${user.name} joined the portal</p>
-                <p class="text-[10px] text-gray-500">Staff ID: ${user.staffId}</p>
-            </div>
-        `;
-        activityList.appendChild(div);
+    combinedActivity.forEach(item => {
+        if (item.type === 'request') {
+            const req = item;
+            const staff = users.find(u => u.id === req.userId);
+            const div = document.createElement('div');
+            div.className = 'group flex items-center p-4 bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer';
+            div.onclick = () => viewDetails(req.id);
+            div.innerHTML = `
+                <div class="h-10 w-10 rounded-xl bg-blue-50 flex items-center justify-center text-ecgBlue mr-4 group-hover:bg-ecgBlue group-hover:text-white transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                </div>
+                <div class="flex-1">
+                    <p class="text-xs font-bold text-gray-900 group-hover:text-ecgBlue transition-colors">${staff ? staff.name : 'Unknown Staff'}</p>
+                    <p class="text-xs text-gray-500 mt-0.5">Submitted a medical request</p>
+                    <p class="text-[10px] text-gray-400 mt-1 flex items-center">
+                        <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        ${formatTimestamp(req.timestamp)}
+                    </p>
+                </div>
+                <span class="text-[10px] ${getStatusClass(req.status)} px-2.5 py-1 rounded-full font-bold border">${req.status}</span>
+            `;
+            activityList.appendChild(div);
+        } else {
+            const user = item;
+            const div = document.createElement('div');
+            div.className = 'group flex items-center p-4 bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer';
+            div.onclick = () => adminViewUser(user.id);
+            div.innerHTML = `
+                <div class="h-10 w-10 rounded-xl bg-green-50 flex items-center justify-center text-green-600 mr-4 group-hover:bg-green-600 group-hover:text-white transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
+                </div>
+                <div class="flex-1">
+                    <p class="text-xs font-bold text-gray-900 group-hover:text-green-600 transition-colors">${user.name}</p>
+                    <p class="text-xs text-gray-500 mt-0.5">Joined the medical portal</p>
+                    <p class="text-[10px] text-gray-400 mt-1 flex items-center">
+                        <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+                        Staff ID: ${user.staffId}
+                    </p>
+                </div>
+                <span class="text-[10px] bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full font-bold border border-gray-200">Staff</span>
+            `;
+            activityList.appendChild(div);
+        }
     });
 
     // Animate Charts
@@ -420,6 +454,7 @@ function renderAdminRequests(filtered = null) {
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatDateOnly(req.timestamp)}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-ecgBlue">${staff ? staff.staffId : 'Unknown'}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-medium">${req.patientName || 'Self'}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${req.hospital}</td>
             <td class="px-6 py-4 whitespace-nowrap"><span class="px-2 py-1 text-xs font-bold rounded-full border ${statusClass}">${req.status}</span></td>
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
@@ -491,7 +526,12 @@ function renderAdminUsers(filtered = null) {
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${user.staffId}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${user.dept}</td>
-            <td class="px-6 py-4 whitespace-nowrap"><span class="px-2 py-1 text-xs rounded-full font-bold ${user.profileCompleted ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}">${user.profileCompleted ? 'Locked' : 'Incomplete'}</span></td>
+            <td class="px-6 py-4 whitespace-nowrap">
+                <span class="inline-flex items-center px-2.5 py-1 text-xs rounded-full font-bold border shadow-sm ${user.profileCompleted ? 'bg-green-50 text-green-700 border-green-100' : 'bg-yellow-50 text-yellow-700 border-yellow-100'}">
+                    <span class="w-1.5 h-1.5 rounded-full mr-1.5 ${user.profileCompleted ? 'bg-green-500' : 'bg-yellow-500'}"></span>
+                    ${user.profileCompleted ? 'Verified' : 'Incomplete'}
+                </span>
+            </td>
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
                 <button onclick="adminViewUser('${user.id}')" class="text-ecgBlue hover:bg-blue-50 px-2 py-1 rounded font-bold transition-colors">
                     View
@@ -968,9 +1008,9 @@ function filterAdminRequests() {
 
     const filtered = medicalRequests.filter(req => {
         const staff = users.find(u => u.id === req.userId);
-        const matchesQuery = (staff && staff.staffId.toLowerCase().includes(query)) ||
-            req.hospital.toLowerCase().includes(query) ||
-            req.id.toLowerCase().includes(query);
+        const matchesQuery = (staff && (staff.staffId || '').toLowerCase().includes(query)) ||
+            (req.hospital || '').toLowerCase().includes(query) ||
+            (req.id || '').toLowerCase().includes(query);
         const matchesStatus = status === 'All' || req.status === status;
         return matchesQuery && matchesStatus;
     });
@@ -983,9 +1023,9 @@ function filterAdminUsers() {
     const profile = document.getElementById('admin-filter-profile').value;
 
     const filtered = users.filter(user => {
-        const matchesQuery = user.name.toLowerCase().includes(query) ||
-            user.staffId.toLowerCase().includes(query) ||
-            user.dept.toLowerCase().includes(query);
+        const matchesQuery = (user.name || '').toLowerCase().includes(query) ||
+            (user.staffId || '').toLowerCase().includes(query) ||
+            (user.dept || '').toLowerCase().includes(query);
         const matchesProfile = profile === 'All' ||
             (profile === 'Locked' && user.profileCompleted) ||
             (profile === 'Incomplete' && !user.profileCompleted);
@@ -1034,6 +1074,10 @@ function renderAdminAuditLogs() {
 }
 
 async function clearAuditLogs() {
+    if (currentUser.role !== ROLES.SUPER_ADMIN) {
+        alert('Permission Denied: Only Super Admins can clear logs.');
+        return;
+    }
     if (!confirm('Are you sure you want to clear all system audit logs? This action is permanent.')) return;
     const btn = document.querySelector('button[onclick="clearAuditLogs()"]');
     const originalText = btn ? btn.textContent : '';
@@ -1134,7 +1178,7 @@ function adminViewUser(userId) {
                         <h2 class="text-2xl font-bold text-ecgBlue font-display">${user.name}</h2>
                         <p class="text-gray-500 font-medium">${user.staffId} • ${user.dept} Department</p>
                         <span class="mt-2 inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${user.profileCompleted ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-yellow-100 text-yellow-800 border border-yellow-200'}">
-                            ${user.profileCompleted ? 'Profile Verified & Locked' : 'Incomplete Profile'}
+                            ${user.profileCompleted ? 'Profile Verified' : 'Incomplete Profile'}
                         </span>
                         ${currentUser.role === ROLES.SUPER_ADMIN ? `
                     <div class="mt-3">
@@ -1737,6 +1781,7 @@ function generatePDFReport() {
         return [
             formatDateOnly(req.timestamp),
             staff ? staff.staffId : 'N/A',
+            req.patientName || 'Self',
             req.hospital,
             req.status
         ];
