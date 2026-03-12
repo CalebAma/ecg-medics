@@ -7,6 +7,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebas
 import {
     collection,
     getDocs,
+    getDoc,
+    setDoc,
     addDoc,
     updateDoc,
     deleteDoc,
@@ -54,25 +56,75 @@ function formatDateOnly(ts) {
     return 'N/A';
 }
 
+// ── Page Loading Skeleton ──────────────────────────────────────────────────
+function showPageLoader() {
+    // Show a full-page dimmed skeleton only if the page content is not yet
+    // visible (avoids flicker on fast connections).
+    let overlay = document.getElementById('_page-loader');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = '_page-loader';
+        overlay.style.cssText = [
+            'position:fixed', 'inset:0', 'z-index:9999',
+            'background:rgba(248,250,252,0.85)', 'backdrop-filter:blur(4px)',
+            'display:flex', 'flex-direction:column',
+            'align-items:center', 'justify-content:center',
+            'transition:opacity 0.3s ease'
+        ].join(';');
+        overlay.innerHTML = `
+            <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+                <div style="width:48px;height:48px;border:4px solid #e5e7eb;border-top-color:#2E3192;border-radius:50%;animation:_spin 0.75s linear infinite"></div>
+                <p style="font-family:Inter,sans-serif;font-size:14px;font-weight:600;color:#6b7280;letter-spacing:0.02em">Loading your portal…</p>
+            </div>
+            <style>@keyframes _spin{to{transform:rotate(360deg)}}</style>
+        `;
+        document.body.appendChild(overlay);
+    }
+    overlay.style.opacity = '1';
+    overlay.style.pointerEvents = 'all';
+}
+
+function hidePageLoader() {
+    const overlay = document.getElementById('_page-loader');
+    if (!overlay) return;
+    overlay.style.opacity = '0';
+    overlay.style.pointerEvents = 'none';
+    setTimeout(() => overlay.remove(), 350);
+}
+
+// ── Data Fetching ───────────────────────────────────────────────────────────
 async function refreshData() {
     try {
-        // Fetch users
-        const usersSnapshot = await getDocs(collection(db, "users"));
-        users = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Only fetch shared data for users who have completed their profile
+        // (avoids permission errors for newly registered, uncompleted users)
+        if (!currentUser || !currentUser.profileCompleted) {
+            return;
+        }
 
-        // Fetch medical requests
-        const requestsSnapshot = await getDocs(query(collection(db, "medical_requests"), orderBy("timestamp", "desc")));
-        medicalRequests = requestsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Fetch all needed data IN PARALLEL (not sequentially)
+        const fetchPromises = [
+            getDocs(collection(db, 'users')),
+            getDocs(query(collection(db, 'medical_requests'), orderBy('timestamp', 'desc')))
+        ];
 
-        // Fetch audit logs (last 100)
-        const logsSnapshot = await getDocs(query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(100)));
-        auditLogs = logsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Only fetch audit logs for managers/admins
+        if (currentUser.role >= ROLES.MANAGER) {
+            fetchPromises.push(
+                getDocs(query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(100)))
+            );
+        }
 
-        console.log("Data refreshed from Firestore.");
+        const results = await Promise.all(fetchPromises);
+
+        users = results[0].docs.map(d => ({ id: d.id, ...d.data() }));
+        medicalRequests = results[1].docs.map(d => ({ id: d.id, ...d.data() }));
+        if (results[2]) auditLogs = results[2].docs.map(d => ({ id: d.id, ...d.data() }));
+
     } catch (e) {
         console.error('Error fetching data from Firestore:', e);
     }
 }
+
 
 async function addAuditLog(action, type, details) {
     try {
@@ -97,10 +149,14 @@ async function addAuditLog(action, type, details) {
 }
 
 // Map functions to window object for legacy HTML onclick handlers
+// Map functions to window object for legacy HTML onclick handlers
 window.logoutUser = logoutUser;
 window.handleLogin = handleLogin;
 window.handleSignup = handleSignup;
+window.handleForgotPassword = handleForgotPassword;
+window.handleResetPassword = handleResetPassword;
 window.toggleAuthForm = toggleAuthForm;
+window.toggleMobileMenu = toggleMobileMenu;
 window.switchAdminTab = switchAdminTab;
 window.filterAdminRequests = filterAdminRequests;
 window.filterAdminUsers = filterAdminUsers;
@@ -112,65 +168,147 @@ window.updateRequestStatus = updateRequestStatus;
 window.openAdminRejectModal = openAdminRejectModal;
 window.handleAdminReject = handleAdminReject;
 window.closeAdminRejectModal = closeAdminRejectModal;
+window.adminOpenAddUserModal = adminOpenAddUserModal;
+window.adminCloseAddUserModal = adminCloseAddUserModal;
+window.handleAdminAddUser = handleAdminAddUser;
+window.adminViewUser = adminViewUser;
+window.adminCloseUserDetails = adminCloseUserDetails;
 window.handleMedicalRequest = handleMedicalRequest;
+window.toggleDependantSections = toggleDependantSections;
+window.renderHistory = renderHistory;
+window.closeModal = closeModal;
+window.handleProfileSave = handleProfileSave;
+window.previewProfilePic = previewProfilePic;
+window.previewSpousePic = previewSpousePic;
+window.addProfileChildRow = addProfileChildRow;
+window.calcChildAge = calcChildAge;
+window.calculateAge = calculateAge;
+window.exportToCSV = exportToCSV;
+window.generatePDFReport = generatePDFReport;
+window.printSingleRequest = printSingleRequest;
+window.handleBulkPrint = handleBulkPrint;
+window.toggleSelectAllRequests = toggleSelectAllRequests;
+window.updateBulkPrintVisibility = updateBulkPrintVisibility;
 
 // DOM Loaded Initialization
 document.addEventListener('DOMContentLoaded', async () => {
     pageId = document.body.id;
 
-    // Listen for Auth State Changes
+    // Show skeleton loader immediately so nothing looks blank
+    if (pageId !== 'page-auth') showPageLoader();
+
+    // ── Listen for Auth State Changes ──────────────────────────────────────
     onAuthStateChanged(auth, async (firebaseUser) => {
         if (firebaseUser) {
-            // Get user details from Firestore
-            const userDoc = await getDocs(query(collection(db, "users"), where("email", "==", firebaseUser.email)));
-            if (!userDoc.empty) {
-                const userData = userDoc.docs[0].data();
+            // Get user details from Firestore by UID (fast single-doc read)
+            const userRef = doc(db, 'users', firebaseUser.uid);
+            const userSnap = await getDoc(userRef);
+
+            if (userSnap.exists()) {
+                const userData = userSnap.data();
                 currentUser = {
-                    id: userDoc.docs[0].id,
+                    id: userSnap.id,
                     ...userData,
                     uid: firebaseUser.uid
                 };
 
-                await refreshData();
+                // Persist minimal user info in sessionStorage so next page
+                // load can show navbar instantly before Firebase responds
+                try {
+                    sessionStorage.setItem('_cu', JSON.stringify({
+                        name: currentUser.name,
+                        staffId: currentUser.staffId,
+                        profilePic: currentUser.profilePic,
+                        role: currentUser.role,
+                        profileCompleted: currentUser.profileCompleted
+                    }));
+                } catch (_) { }
 
+                // --- Routing Logic ------------------------------------------
+
+                // 1. Logged-in user on auth page -> redirect appropriately
                 if (pageId === 'page-auth') {
-                    window.location.href = 'dashboard.html';
-                } else {
-                    handleAdminNavbar();
-                    updateNavbarUser();
-                    initPage(pageId);
+                    if (!currentUser.profileCompleted) {
+                        window.location.href = 'profile.html';
+                    } else {
+                        window.location.href = 'dashboard.html';
+                    }
+                    return;
                 }
+
+                // 2. User without a completed profile -> force profile page
+                if (!currentUser.profileCompleted && pageId !== 'page-profile') {
+                    window.location.href = 'profile.html';
+                    return;
+                }
+
+                // 3. Safe to load data and render the page
+                await refreshData();
+                handleAdminNavbar();
+                updateNavbarUser();
+                initPage(pageId);
+                hidePageLoader();
+
             } else {
-                // User exists in Auth but not in Firestore? This shouldn't happen.
+                // User exists in Auth but not in Firestore — sign them out
                 await signOut(auth);
                 window.location.href = 'index.html';
             }
         } else {
+            // Not logged in — send to auth page
+            hidePageLoader();
             if (pageId !== 'page-auth') {
                 window.location.href = 'index.html';
             } else {
-                document.getElementById('login-form').classList.remove('view-hidden');
+                const loginForm = document.getElementById('login-form');
+                if (loginForm) loginForm.classList.remove('view-hidden');
             }
         }
     });
+
+    // ── Instant Navbar Pre-render from cache ───────────────────────────────
+    // While Firebase is still resolving auth, pre-populate the navbar
+    // with the last known user data for a snappy perceived load time.
+    if (pageId !== 'page-auth') {
+        try {
+            const cached = JSON.parse(sessionStorage.getItem('_cu') || 'null');
+            if (cached) {
+                const nameEl = document.getElementById('nav-user-info');
+                if (nameEl && !nameEl.innerHTML) {
+                    const avatarUrl = cached.profilePic ||
+                        `https://ui-avatars.com/api/?name=${encodeURIComponent(cached.name || 'User')}&background=2E3192&color=fff&size=64`;
+                    nameEl.innerHTML = `
+                        <div class="flex items-center space-x-2">
+                            <img src="${avatarUrl}" class="h-8 w-8 rounded-full object-cover border-2 border-white/30" alt="avatar">
+                            <span class="text-sm font-semibold text-white">${(cached.name || '').split(' ')[0]}</span>
+                        </div>`;
+                }
+            }
+        } catch (_) { }
+    }
 });
+
 
 // File uploads are now handled server-side by save_profile.php
 // The uploadFile function is no longer needed.
 
 
 function initPage(pageId) {
-    if (pageId !== 'page-profile' && pageId !== 'page-auth' && !currentUser.profileCompleted) {
-        window.location.href = 'profile.html';
-        return;
-    }
-
+    // Guard is already handled in onAuthStateChanged — just init the correct page
     if (pageId === 'page-dashboard') updateDashboard();
-    if (pageId === 'page-request') setupRequestForm();
-    if (pageId === 'page-history') renderHistory();
-    if (pageId === 'page-profile') setupProfile();
-    if (pageId === 'page-admin') setupAdmin();
+    else if (pageId === 'page-request') setupRequestForm();
+    else if (pageId === 'page-history') renderHistory();
+    else if (pageId === 'page-profile') setupProfile();
+    else if (pageId === 'page-admin') {
+        // Extra guard: only managers/admins can access admin page
+        if (currentUser.role < ROLES.MANAGER) {
+            window.location.href = 'dashboard.html';
+            return;
+        }
+        setupAdmin();
+    }
 }
+
 
 // Admin Specific Logic
 function setupAdmin() {
@@ -179,7 +317,7 @@ function setupAdmin() {
     renderAdminRequests();
     renderAdminUsers();
     renderAdminAuditLogs();
-    switchAdminTab('overview');
+    switchAdminTab('overview'); // Ensure this is called last to highlight the correct tab
 }
 
 function updateAdminStats() {
@@ -272,6 +410,9 @@ function renderAdminRequests(filtered = null) {
         const statusClass = getStatusClass(req.status);
 
         tr.innerHTML = `
+            <td class="px-6 py-4">
+                <input type="checkbox" name="admin-req-select" value="${req.id}" onchange="updateBulkPrintVisibility()" class="rounded text-ecgBlue focus:ring-ecgBlue">
+            </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatDateOnly(req.timestamp)}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-ecgBlue">${staff ? staff.staffId : 'Unknown'}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${req.hospital}</td>
@@ -281,11 +422,28 @@ function renderAdminRequests(filtered = null) {
                 ${req.status === 'Pending' ? `
                     <button onclick="updateRequestStatus('${req.id}', 'Approved')" class="text-green-600 hover:bg-green-50 px-2 py-1 rounded">Approve</button>
                     <button onclick="openAdminRejectModal('${req.id}')" class="text-red-600 hover:bg-red-50 px-2 py-1 rounded">Reject</button>
-                ` : ``}
+                ` : `
+                    <button onclick="printSingleRequest('${req.id}')" class="text-green-600 hover:bg-green-50 px-2 py-1 rounded">Print</button>
+                `}
             </td>
         `;
         tbody.appendChild(tr);
     });
+}
+
+function updateBulkPrintVisibility() {
+    const checked = document.querySelectorAll('input[name="admin-req-select"]:checked');
+    const btn = document.getElementById('btn-bulk-print');
+    if (btn) {
+        if (checked.length > 0) btn.classList.remove('view-hidden');
+        else btn.classList.add('view-hidden');
+    }
+}
+
+function toggleSelectAllRequests(master) {
+    const checkboxes = document.querySelectorAll('input[name="admin-req-select"]');
+    checkboxes.forEach(c => c.checked = master.checked);
+    updateBulkPrintVisibility();
 }
 
 function renderAdminUsers(filtered = null) {
@@ -319,7 +477,7 @@ function renderAdminUsers(filtered = null) {
         tr.innerHTML = `
             <td class="px-6 py-4 whitespace-nowrap">
                 <div class="flex items-center">
-                    <img class="h-8 w-8 rounded-full mr-3 border border-gray-100" src="${user.profilePic || 'https://ui-avatars.com/api/?name=' + user.name}">
+                    <img class="h-8 w-8 rounded-full mr-3 border border-gray-100" src="${user.profilePic || 'https://ui-avatars.com/api/?name=' + user.name}" loading="lazy">
                     <div>
                         <span class="text-sm font-medium text-gray-900 block">${user.name}</span>
                         ${roleBadge}
@@ -454,7 +612,7 @@ function toggleMobileMenu() {
 }
 
 function handleAdminNavbar() {
-    if (!currentUser || (!currentUser.isAdmin && currentUser.role === ROLES.STAFF)) return;
+    if (!currentUser || currentUser.role < ROLES.MANAGER) return;
     let navbar = document.querySelector('#app-navbar .md\\:flex');
     if (!navbar) navbar = document.querySelector('#app-navbar .flex.items-center.space-x-4');
     if (navbar && !document.getElementById('nav-admin-link')) {
@@ -489,6 +647,8 @@ function updateNavbarUser() {
 
     const firstName = currentUser.name.split(' ')[0];
 
+    const avatarUrl = currentUser.profilePic || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.name)}&background=f3b204&color=2E3192`;
+
     userInfo.innerHTML = `
         <div class="flex items-center space-x-3 bg-white/5 px-3 py-1.5 rounded-xl border border-white/10 backdrop-blur-sm mr-4">
             <div class="text-right hidden sm:block">
@@ -496,7 +656,7 @@ function updateNavbarUser() {
                 <p class="text-[10px] font-medium text-gray-400 uppercase tracking-tighter">${roleName}</p>
             </div>
             <div class="h-8 w-8 rounded-lg overflow-hidden border border-white/20 shadow-inner">
-                <img src="${currentUser.profilePic || 'https://ui-avatars.com/api/?name=' + currentUser.name + '&background=f3b204&color=0b3b60'}" class="h-full w-full object-cover">
+                <img src="${avatarUrl}" class="h-full w-full object-cover">
             </div>
         </div>
         `;
@@ -571,9 +731,9 @@ async function handleSignup(e) {
         const userCredential = await createUserWithEmailAndPassword(auth, email, pwd);
         const user = userCredential.user;
 
-        // 2. Create Firestore Profile
+        // 2. Create Firestore Profile using UID
         const role = (dept === 'IT') ? ROLES.SUPER_ADMIN : ROLES.STAFF;
-        await addDoc(collection(db, "users"), {
+        await setDoc(doc(db, "users", user.uid), {
             name,
             staffId,
             email,
@@ -587,7 +747,9 @@ async function handleSignup(e) {
         // Redirect handled by onAuthStateChanged
     } catch (error) {
         console.error('Signup Error:', error);
-        showError(errorDiv, error.message || 'Registration failed. Please try again.');
+        let msg = error.message || 'Registration failed.';
+        if (error.code === 'auth/email-already-in-use') msg = 'This email is already registered.';
+        showError(errorDiv, msg);
         btn.disabled = false;
         btn.textContent = originalText;
     }
@@ -689,28 +851,36 @@ function showError(el, msg) {
 
 // Dashboard Update
 function updateDashboard() {
-    const firstName = currentUser.name.split(' ')[0];
+    if (!currentUser) return;
+
+    const firstName = currentUser.name ? currentUser.name.split(' ')[0] : 'User';
     document.getElementById('dash-name').textContent = firstName;
-    document.getElementById('dash-id').textContent = currentUser.staffId;
+    document.getElementById('dash-id').textContent = currentUser.staffId || 'N/A';
 
     const deptEl = document.getElementById('dash-dept');
     if (deptEl) {
-        deptEl.textContent = currentUser.isAdmin ? 'System Administration' : (currentUser.dept || 'N/A');
+        deptEl.textContent = currentUser.dept || 'N/A';
     }
 
-    if (currentUser.profilePic && document.getElementById('dash-profile-pic')) {
-        document.getElementById('dash-profile-pic').src = currentUser.profilePic;
-    } else if (currentUser.isAdmin && document.getElementById('dash-profile-pic')) {
-        document.getElementById('dash-profile-pic').src = 'https://ui-avatars.com/api/?name=Admin+User&background=0b3b60&color=fff';
+    const profPicEl = document.getElementById('dash-profile-pic');
+    if (profPicEl) {
+        const background = currentUser.role >= ROLES.MANAGER ? '2E3192' : 'f3b204';
+        const color = currentUser.role >= ROLES.MANAGER ? 'fff' : '2E3192';
+        const avatarUrl = currentUser.profilePic ||
+            `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.name || 'User')}&background=${background}&color=${color}&size=128`;
+
+        // Swap src; onload handler in HTML removes the skeleton shimmer class
+        profPicEl.onload = () => profPicEl.classList.remove('skeleton');
+        profPicEl.src = avatarUrl;
     }
 
-    // For Admin on dashboard, show global stats. For users, show personal stats.
-    const displayRequests = currentUser.isAdmin ? medicalRequests : medicalRequests.filter(r => r.userId === currentUser.id);
+    // Every user (Staff and Manager) should see their personal stats on the dashboard
+    const personalRequests = medicalRequests.filter(r => r.userId === currentUser.id);
 
-    document.getElementById('stat-total').textContent = displayRequests.length;
-    document.getElementById('stat-approved').textContent = displayRequests.filter(r => r.status === 'Approved').length;
-    document.getElementById('stat-pending').textContent = displayRequests.filter(r => r.status === 'Pending').length;
-    document.getElementById('stat-rejected').textContent = displayRequests.filter(r => r.status === 'Rejected').length;
+    document.getElementById('stat-total').textContent = personalRequests.length;
+    document.getElementById('stat-approved').textContent = personalRequests.filter(r => r.status === 'Approved').length;
+    document.getElementById('stat-pending').textContent = personalRequests.filter(r => r.status === 'Pending').length;
+    document.getElementById('stat-rejected').textContent = personalRequests.filter(r => r.status === 'Rejected').length;
 }
 
 // Request Medical Attention Methods
@@ -907,9 +1077,9 @@ async function handleAdminAddUser(e) {
         const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, pwd);
         const newUid = userCredential.user.uid;
 
-        // 2. Create Firestore Profile
+        // 2. Create Firestore Profile using UID
         const role = (dept === 'IT') ? ROLES.SUPER_ADMIN : ROLES.STAFF;
-        await addDoc(collection(db, "users"), {
+        await setDoc(doc(db, "users", newUid), {
             name,
             staffId,
             email,
@@ -947,7 +1117,7 @@ function adminViewUser(userId) {
     content.innerHTML = `
         <div class="flex items-start justify-between mb-8">
             <div class="flex items-center">
-                <img class="h-20 w-20 rounded-2xl border-4 border-white shadow-lg object-cover" src="${user.profilePic || 'https://ui-avatars.com/api/?name=' + user.name + '&size=128'}">
+                <img class="h-20 w-20 rounded-2xl border-4 border-white shadow-lg object-cover" src="${user.profilePic || 'https://ui-avatars.com/api/?name=' + user.name + '&size=128'}" loading="lazy">
                     <div class="ml-6">
                         <h2 class="text-2xl font-bold text-ecgBlue font-display">${user.name}</h2>
                         <p class="text-gray-500 font-medium">${user.staffId} • ${user.dept} Department</p>
@@ -1183,19 +1353,25 @@ async function renderHistory() {
         userRequests.forEach(req => {
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 font-display">REQ-${req.id.substring(0, 6)}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">${formatDateOnly(req.timestamp)}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-medium">${req.patientName || 'Self'}</td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-medium">${req.hospital}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-medium">${req.targetDate}</td>
                 <td class="px-6 py-4 whitespace-nowrap">
                     <span class="px-2.5 py-1 text-xs font-bold rounded-lg shadow-sm ${getStatusClass(req.status)}">
                         ${req.status}
                     </span>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button onclick="viewDetails('${req.id}')" class="text-ecgBlue hover:text-ecgBlueDark font-bold flex items-center justify-end ml-auto group">
+                <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                    <button onclick="viewDetails('${req.id}')" class="text-ecgBlue hover:text-ecgBlueDark font-bold inline-flex items-center group">
                         Details 
                         <svg class="w-4 h-4 ml-1 transform group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
                     </button>
+                    ${req.status === 'Approved' ? `
+                    <button onclick="printSingleRequest('${req.id}')" class="text-green-600 hover:text-green-700 font-bold inline-flex items-center ml-4">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+                        Print
+                    </button>
+                    ` : ''}
                 </td>
             `;
             tbody.appendChild(tr);
@@ -1432,7 +1608,7 @@ async function handleProfileSave(e) {
         };
 
         // 1. Skip Image Uploads (Free Plan - No Storage)
-        userData.profilePic = `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.name)}&background=0b3b60&color=fff`;
+        userData.profilePic = `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.name)}&background=2E3192&color=fff`;
 
         // 4. Handle Children (Text Only)
         const childEntries = document.querySelectorAll('.prof-child-entry');
@@ -1446,15 +1622,18 @@ async function handleProfileSave(e) {
             });
         }
 
-        // 5. Update Firestore
-        await updateDoc(doc(db, "users", currentUser.id), userData);
+        // 5. Update Firestore — use uid which is always the document ID
+        await updateDoc(doc(db, "users", currentUser.uid), userData);
 
         // Update local state
         Object.assign(currentUser, userData);
 
-        await addAuditLog('Completed Profile', 'Profile', `Staff member ${currentUser.name} completed and locked their profile.`);
+        // Attempt audit log — silently skip if permission denied (e.g. role not yet elevated)
+        try {
+            await addAuditLog('Completed Profile', 'Profile', `Staff member ${currentUser.name} completed and locked their profile.`);
+        } catch (_) { }
 
-        alert('Profile saved successfully! Your profile is now locked for verification.');
+        alert('Profile saved successfully! Redirecting to your dashboard...');
         window.location.href = 'dashboard.html';
     } catch (error) {
         console.error('Profile Save Error:', error);
@@ -1561,3 +1740,119 @@ function generatePDFReport() {
 
     doc.save(`ECG_System_Report_${new Date().toISOString().split('T')[0]}.pdf`);
 }
+
+function printSingleRequest(reqId) {
+    if (typeof jspdf === 'undefined') {
+        alert('PDF library not loaded.');
+        return;
+    }
+
+    const req = medicalRequests.find(r => r.id === reqId);
+    if (!req) return;
+
+    const staff = users.find(u => u.id === req.userId);
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    // Template for a medical request form
+    renderMedicalPDF(doc, req, staff, 20);
+
+    doc.save(`Medical_Request_${req.id.substring(0, 8)}.pdf`);
+}
+
+function handleBulkPrint() {
+    if (typeof jspdf === 'undefined') {
+        alert('PDF library not loaded.');
+        return;
+    }
+
+    const checked = document.querySelectorAll('input[name="admin-req-select"]:checked');
+    if (checked.length === 0) return;
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    checked.forEach((cb, index) => {
+        const reqId = cb.value;
+        const req = medicalRequests.find(r => r.id === reqId);
+        const staff = users.find(u => u.id === req.userId);
+
+        if (index > 0) doc.addPage();
+        renderMedicalPDF(doc, req, staff, 20);
+    });
+
+    doc.save(`Bulk_Medical_Requests_${new Date().getTime()}.pdf`);
+}
+
+function renderMedicalPDF(doc, req, staff, startY) {
+    // Header
+    doc.setFillColor(46, 49, 146);
+    doc.rect(0, 0, 210, 40, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22);
+    doc.text("ECG MEDICAL PORTAL", 105, 20, { align: "center" });
+    doc.setFontSize(10);
+    doc.text("OFFICIAL MEDICAL ATTENTION REQUEST", 105, 30, { align: "center" });
+
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(12);
+    let y = 55;
+
+    // Staff Info
+    doc.setFont("helvetica", "bold");
+    doc.text("STAFF INFORMATION", 20, y);
+    doc.setFont("helvetica", "normal");
+    y += 10;
+    doc.autoTable({
+        startY: y,
+        body: [
+            ["Name:", staff ? staff.name : "N/A", "Staff ID:", staff ? staff.staffId : "N/A"],
+            ["Department:", staff ? staff.dept : "N/A", "Email:", staff ? staff.email : "N/A"]
+        ],
+        theme: 'plain',
+        styles: { fontSize: 10 }
+    });
+
+    y = doc.lastAutoTable.finalY + 15;
+
+    // Request Info
+    doc.setFont("helvetica", "bold");
+    doc.text("REQUEST DETAILS", 20, y);
+    doc.setFont("helvetica", "normal");
+    y += 10;
+    doc.autoTable({
+        startY: y,
+        body: [
+            ["Request ID:", req.id, "Status:", req.status],
+            ["Hospital/Facility:", req.hospital, "Date Requested:", req.targetDate],
+            ["Patient Name:", req.patientName, "Patient Type:", req.patientType]
+        ],
+        theme: 'grid',
+        headStyles: { fillColor: [46, 49, 146] }
+    });
+
+    y = doc.lastAutoTable.finalY + 15;
+
+    // Purpose
+    doc.setFont("helvetica", "bold");
+    doc.text("PURPOSE OF VISIT", 20, y);
+    doc.setFont("helvetica", "normal");
+    y += 8;
+    doc.setFontSize(10);
+    const splitPurpose = doc.splitTextToSize(req.purpose, 170);
+    doc.text(splitPurpose, 20, y);
+
+    y += (splitPurpose.length * 5) + 20;
+
+    // Footer/Signatures
+    doc.line(20, y, 90, y);
+    doc.line(120, y, 190, y);
+    y += 5;
+    doc.setFontSize(8);
+    doc.text("STAFF SIGNATURE", 55, y, { align: "center" });
+    doc.text("ADMINISTRATOR APPROVAL", 155, y, { align: "center" });
+
+    y += 15;
+    doc.text(`Printed on: ${new Date().toLocaleString()}`, 105, y, { align: "center" });
+}
+

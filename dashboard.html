@@ -13,6 +13,8 @@
     <link rel="icon" type="image/png" href="logo.png">
 
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -22,13 +24,13 @@
                         display: ['Outfit', 'sans-serif'],
                     },
                     colors: {
-                        ecgBlue: '#0b3b60',
+                        ecgBlue: '#2E3192',
                         ecgYellow: '#f3b204',
-                        ecgBlueDark: '#07243c',
+                        ecgBlueDark: '#1a1d6e',
                     },
                     boxShadow: {
-                        'premium': '0 10px 40px -10px rgba(11,59,96,0.1)',
-                        'premium-hover': '0 20px 40px -10px rgba(11,59,96,0.2)',
+                        'premium': '0 10px 40px -10px rgba(46,49,146,0.1)',
+                        'premium-hover': '0 20px 40px -10px rgba(46,49,146,0.2)',
                     }
                 }
             }
@@ -72,7 +74,25 @@
 
         .interactive-card:hover {
             transform: translateY(-4px);
-            box-shadow: 0 20px 40px -10px rgba(11, 59, 96, 0.2);
+            box-shadow: 0 20px 40px -10px rgba(46, 49, 146, 0.2);
+        }
+
+        /* Skeleton shimmer for loading states */
+        .skeleton {
+            background: linear-gradient(90deg, #f0f4f8 25%, #e2e8f0 50%, #f0f4f8 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.4s infinite;
+            border-radius: 6px;
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: 200% 0;
+            }
+
+            100% {
+                background-position: -200% 0;
+            }
         }
     </style>
 </head>
@@ -92,7 +112,7 @@
                 <div class="flex-shrink-0 flex items-center cursor-pointer"
                     onclick="window.location.href='dashboard.html'">
                     <img src="logo.png" alt="ECG Logo"
-                        class="h-10 w-auto object-contain bg-white/20 p-1 rounded backdrop-blur-sm border border-white/10">
+                        class="h-10 w-auto object-contain bg-white/20 p-1 rounded backdrop-blur-sm border border-white/10" loading="lazy">
                     <span class="ml-3 font-bold text-lg text-white tracking-tight">ECG Medical Portal</span>
                 </div>
                 <!-- Desktop Menu -->
@@ -106,15 +126,6 @@
                         class="hover:text-ecgYellow px-3 py-2 rounded-md text-sm font-medium transition">History</a>
                     <div class="border-l border-blue-700 h-6 mx-2"></div>
                     <div id="nav-user-info"></div>
-                    <button onclick="logoutUser()"
-                        class="text-red-300 hover:text-red-400 px-3 py-2 rounded-md text-sm font-medium transition flex items-center">
-                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1">
-                            </path>
-                        </svg>
-                        Logout
-                    </button>
                 </div>
                 <!-- Mobile menu button -->
                 <div class="flex items-center md:hidden">
@@ -144,10 +155,11 @@
 
     <div class="flex flex-1">
         <!-- Sidebar -->
-        <aside class="hidden md:flex flex-col w-64 bg-white border-r border-gray-200 min-h-[calc(100vh-4rem)]">
-            <nav class="flex-1 px-4 py-4 space-y-2">
+        <aside
+            class="hidden md:flex flex-col w-64 bg-white border-r border-gray-200 sticky top-16 h-[calc(100vh-4rem)]">
+            <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
                 <a href="dashboard.html"
-                    class="bg-blue-50 text-ecgBlue group flex items-center px-3 py-2 text-sm font-medium rounded-md border border-blue-100">
+                    class="bg-blue-50 text-ecgBlue group flex items-center px-3 py-2.5 text-sm font-bold rounded-xl border border-blue-100 transition-all shadow-sm">
                     <svg class="mr-3 h-5 w-5 text-ecgBlue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6">
@@ -156,7 +168,7 @@
                     Dashboard
                 </a>
                 <a href="request.html"
-                    class="text-gray-600 hover:bg-gray-50 hover:text-ecgBlue group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    class="text-gray-600 hover:bg-gray-50 hover:text-ecgBlue group flex items-center px-3 py-2.5 text-sm font-medium rounded-xl transition-all">
                     <svg class="mr-3 h-5 w-5 text-gray-400 group-hover:text-ecgBlue" fill="none" stroke="currentColor"
                         viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -166,7 +178,7 @@
                     Medical Requests
                 </a>
                 <a href="history.html"
-                    class="text-gray-600 hover:bg-gray-50 hover:text-ecgBlue group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    class="text-gray-600 hover:bg-gray-50 hover:text-ecgBlue group flex items-center px-3 py-2.5 text-sm font-medium rounded-xl transition-all">
                     <svg class="mr-3 h-5 w-5 text-gray-400 group-hover:text-ecgBlue" fill="none" stroke="currentColor"
                         viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -175,7 +187,7 @@
                     History
                 </a>
                 <a href="profile.html"
-                    class="text-gray-600 hover:bg-gray-50 hover:text-ecgBlue group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    class="text-gray-600 hover:bg-gray-50 hover:text-ecgBlue group flex items-center px-3 py-2.5 text-sm font-medium rounded-xl transition-all">
                     <svg class="mr-3 h-5 w-5 text-gray-400 group-hover:text-ecgBlue" fill="none" stroke="currentColor"
                         viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -184,6 +196,18 @@
                     Profile
                 </a>
             </nav>
+            <div class="p-4 border-t border-gray-100">
+                <button onclick="logoutUser()"
+                    class="w-full flex items-center px-3 py-3 text-sm font-bold text-red-600 hover:bg-red-50 rounded-xl transition-all group">
+                    <svg class="mr-3 h-5 w-5 text-red-500 group-hover:scale-110 transition-transform" fill="none"
+                        stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1">
+                        </path>
+                    </svg>
+                    Logout Session
+                </button>
+            </div>
         </aside>
 
         <main class="flex-grow w-full">
@@ -196,15 +220,16 @@
                     </div>
                     <div class="flex items-center space-x-6 relative z-10">
                         <img id="dash-profile-pic"
-                            class="h-20 w-20 rounded-full object-cover border-4 border-white shadow-md bg-gray-50"
-                            src="https://ui-avatars.com/api/?name=User&background=0b3b60&color=fff" alt="User Avatar">
+                            class="h-20 w-20 rounded-full object-cover border-4 border-white shadow-md bg-gray-100 skeleton"
+                            src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+                            alt="User Avatar" loading="lazy" onload="this.classList.remove('skeleton')">
                         <div>
                             <h1 class="text-3xl font-extrabold text-gray-900 font-display tracking-tight">Welcome, <span
-                                    id="dash-name" class="text-ecgBlue">User</span></h1>
+                                    id="dash-name" class="text-ecgBlue">&#8203;</span></h1>
                             <p class="text-base text-gray-500 mt-1">
-                                Staff ID: <span id="dash-id" class="font-semibold text-gray-800"></span> <span
+                                Staff ID: <span id="dash-id" class="font-semibold text-gray-800">&#8203;</span> <span
                                     class="mx-2 text-gray-300">|</span>
-                                Department: <span id="dash-dept" class="font-semibold text-gray-800"></span>
+                                Department: <span id="dash-dept" class="font-semibold text-gray-800">&#8203;</span>
                             </p>
                         </div>
                     </div>
@@ -225,30 +250,65 @@
                     <!-- Summary Cards -->
                     <div
                         class="bg-white overflow-hidden shadow-sm rounded-2xl border border-gray-100 border-l-4 border-l-blue-500 interactive-card">
-                        <div class="p-6">
-                            <dt class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Total Requests</dt>
-                            <dd class="mt-2 text-4xl font-display font-bold text-gray-900" id="stat-total">0</dd>
+                        <div class="p-6 flex items-center justify-between">
+                            <div>
+                                <dt class="text-xs font-bold text-gray-400 uppercase tracking-widest">Total</dt>
+                                <dd class="mt-1 text-4xl font-display font-bold text-gray-900" id="stat-total">–</dd>
+                            </div>
+                            <div class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                                <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                </svg>
+                            </div>
                         </div>
                     </div>
                     <div
                         class="bg-white overflow-hidden shadow-sm rounded-2xl border border-gray-100 border-l-4 border-l-green-500 interactive-card">
-                        <div class="p-6">
-                            <dt class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Approved</dt>
-                            <dd class="mt-2 text-4xl font-display font-bold text-gray-900" id="stat-approved">0</dd>
+                        <div class="p-6 flex items-center justify-between">
+                            <div>
+                                <dt class="text-xs font-bold text-gray-400 uppercase tracking-widest">Approved</dt>
+                                <dd class="mt-1 text-4xl font-display font-bold text-gray-900" id="stat-approved">–</dd>
+                            </div>
+                            <div class="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center">
+                                <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M5 13l4 4L19 7" />
+                                </svg>
+                            </div>
                         </div>
                     </div>
                     <div
                         class="bg-white overflow-hidden shadow-sm rounded-2xl border border-gray-100 border-l-4 border-l-yellow-500 interactive-card">
-                        <div class="p-6">
-                            <dt class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Pending</dt>
-                            <dd class="mt-2 text-4xl font-display font-bold text-gray-900" id="stat-pending">0</dd>
+                        <div class="p-6 flex items-center justify-between">
+                            <div>
+                                <dt class="text-xs font-bold text-gray-400 uppercase tracking-widest">Pending</dt>
+                                <dd class="mt-1 text-4xl font-display font-bold text-gray-900" id="stat-pending">–</dd>
+                            </div>
+                            <div class="w-10 h-10 rounded-xl bg-yellow-50 flex items-center justify-center">
+                                <svg class="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            </div>
                         </div>
                     </div>
                     <div
                         class="bg-white overflow-hidden shadow-sm rounded-2xl border border-gray-100 border-l-4 border-l-red-500 interactive-card">
-                        <div class="p-6">
-                            <dt class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Rejected</dt>
-                            <dd class="mt-2 text-4xl font-display font-bold text-gray-900" id="stat-rejected">0</dd>
+                        <div class="p-6 flex items-center justify-between">
+                            <div>
+                                <dt class="text-xs font-bold text-gray-400 uppercase tracking-widest">Rejected</dt>
+                                <dd class="mt-1 text-4xl font-display font-bold text-gray-900" id="stat-rejected">–</dd>
+                            </div>
+                            <div class="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center">
+                                <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </div>
                         </div>
                     </div>
                 </div>

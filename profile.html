@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -22,13 +22,13 @@
                         display: ['Outfit', 'sans-serif'],
                     },
                     colors: {
-                        ecgBlue: '#0b3b60',
+                        ecgBlue: '#2E3192',
                         ecgYellow: '#f3b204',
-                        ecgBlueDark: '#07243c',
+                        ecgBlueDark: '#1a1d6e',
                     },
                     boxShadow: {
-                        'premium': '0 10px 40px -10px rgba(11,59,96,0.1)',
-                        'premium-hover': '0 20px 40px -10px rgba(11,59,96,0.2)',
+                        'premium': '0 10px 40px -10px rgba(46,49,146,0.1)',
+                        'premium-hover': '0 20px 40px -10px rgba(46,49,146,0.2)',
                     }
                 }
             }
@@ -75,7 +75,7 @@
 
         .input-premium:focus {
             transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(11, 59, 96, 0.1);
+            box-shadow: 0 4px 12px rgba(46, 49, 146, 0.1);
         }
     </style>
 </head>
@@ -110,15 +110,6 @@
                         class="hover:text-ecgYellow px-3 py-2 rounded-md text-sm font-medium transition">History</a>
                     <div class="border-l border-blue-700 h-6 mx-2"></div>
                     <div id="nav-user-info"></div>
-                    <button onclick="logoutUser()"
-                        class="text-red-300 hover:text-red-400 px-3 py-2 rounded-md text-sm font-medium transition flex items-center">
-                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1">
-                            </path>
-                        </svg>
-                        Logout
-                    </button>
                 </div>
                 <!-- Mobile menu button -->
                 <div class="flex items-center md:hidden">
@@ -150,10 +141,11 @@
 
     <div class="flex flex-1">
         <!-- Sidebar -->
-        <aside class="hidden md:flex flex-col w-64 bg-white border-r border-gray-200 min-h-[calc(100vh-4rem)]">
-            <nav class="flex-1 px-4 py-4 space-y-2">
+        <aside
+            class="hidden md:flex flex-col w-64 bg-white border-r border-gray-200 sticky top-16 h-[calc(100vh-4rem)]">
+            <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
                 <a href="dashboard.html"
-                    class="text-gray-600 hover:bg-gray-50 hover:text-ecgBlue group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    class="text-gray-600 hover:bg-gray-50 hover:text-ecgBlue group flex items-center px-3 py-2.5 text-sm font-medium rounded-xl transition-all">
                     <svg class="mr-3 h-5 w-5 text-gray-400 group-hover:text-ecgBlue" fill="none" stroke="currentColor"
                         viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -163,7 +155,7 @@
                     Dashboard
                 </a>
                 <a href="request.html"
-                    class="text-gray-600 hover:bg-gray-50 hover:text-ecgBlue group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    class="text-gray-600 hover:bg-gray-50 hover:text-ecgBlue group flex items-center px-3 py-2.5 text-sm font-medium rounded-xl transition-all">
                     <svg class="mr-3 h-5 w-5 text-gray-400 group-hover:text-ecgBlue" fill="none" stroke="currentColor"
                         viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -173,7 +165,7 @@
                     Medical Requests
                 </a>
                 <a href="history.html"
-                    class="text-gray-600 hover:bg-gray-50 hover:text-ecgBlue group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    class="text-gray-600 hover:bg-gray-50 hover:text-ecgBlue group flex items-center px-3 py-2.5 text-sm font-medium rounded-xl transition-all">
                     <svg class="mr-3 h-5 w-5 text-gray-400 group-hover:text-ecgBlue" fill="none" stroke="currentColor"
                         viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -182,7 +174,7 @@
                     History
                 </a>
                 <a href="profile.html"
-                    class="bg-blue-50 text-ecgBlue group flex items-center px-3 py-2 text-sm font-medium rounded-md border border-blue-100">
+                    class="bg-blue-50 text-ecgBlue group flex items-center px-3 py-2.5 text-sm font-bold rounded-xl border border-blue-100 transition-all shadow-sm">
                     <svg class="mr-3 h-5 w-5 text-ecgBlue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
@@ -190,16 +182,38 @@
                     Profile
                 </a>
             </nav>
+            <div class="p-4 border-t border-gray-100">
+                <button onclick="logoutUser()"
+                    class="w-full flex items-center px-3 py-3 text-sm font-bold text-red-600 hover:bg-red-50 rounded-xl transition-all group">
+                    <svg class="mr-3 h-5 w-5 text-red-500 group-hover:scale-110 transition-transform" fill="none"
+                        stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1">
+                        </path>
+                    </svg>
+                    Logout Session
+                </button>
+            </div>
         </aside>
 
         <main class="flex-grow w-full">
             <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 fade-in">
-                <div class="mb-8">
-                    <h2 class="text-3xl font-extrabold text-gray-900 border-l-4 border-ecgBlue pl-4 font-display">Staff
-                        Profile Builder</h2>
-                    <p class="mt-2 text-base text-gray-600 pl-5">Please complete your profile by providing your family
-                        information. This will be locked securely once submitted.</p>
+                <!-- Page Header -->
+                <div class="mb-8 flex items-center gap-4">
+                    <div
+                        class="w-12 h-12 rounded-2xl bg-ecgBlue flex items-center justify-center shadow-md flex-shrink-0">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-extrabold text-gray-900 font-display tracking-tight">Staff Profile</h2>
+                        <p class="mt-0.5 text-sm text-gray-500">Complete your profile. It will be locked securely once
+                            submitted.</p>
+                    </div>
                 </div>
+
 
                 <div class="bg-white rounded-2xl shadow-premium border border-gray-100 p-6 md:p-10 slide-up">
                     <form id="profile-form" onsubmit="handleProfileSave(event)" class="space-y-8">
@@ -268,7 +282,7 @@
                                 <div class="shrink-0 relative group">
                                     <img id="prof-pic-preview"
                                         class="h-20 w-20 object-cover rounded-full bg-gray-200 shadow-md border-2 border-white"
-                                        src="https://ui-avatars.com/api/?name=User&background=0b3b60&color=fff"
+                                        src="https://ui-avatars.com/api/?name=User&background=2E3192&color=fff"
                                         alt="Current profile photo" />
                                 </div>
                                 <label class="block w-full">
