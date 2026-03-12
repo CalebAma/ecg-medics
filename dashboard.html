@@ -392,6 +392,33 @@
             </div>
         </main>
     </div>
+    <!-- Request Status Notification Modal -->
+    <div id="status-notification-modal" class="view-hidden fixed inset-0 z-[60] overflow-y-auto">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 transition-opacity bg-gray-900 bg-opacity-75 backdrop-blur-sm" onclick="closeStatusNotification()"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-3xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-md sm:w-full border border-blue-50">
+                <div class="bg-white px-8 pt-8 pb-6">
+                    <div id="notification-icon-container" class="mx-auto flex items-center justify-center h-16 w-16 rounded-2xl mb-6">
+                        <!-- Icon injected by JS -->
+                    </div>
+                    <div class="text-center">
+                        <h3 class="text-2xl font-bold text-gray-900 font-display mb-2" id="notification-title">Update on Your Request</h3>
+                        <p class="text-base text-gray-500 leading-relaxed" id="notification-message">Loading details...</p>
+                    </div>
+                </div>
+                <div class="bg-gray-50 px-8 py-6 flex flex-col space-y-3">
+                    <button onclick="window.location.href='history.html'" class="w-full inline-flex justify-center rounded-xl border border-transparent shadow-md px-6 py-3 bg-ecgBlue text-sm font-bold text-white hover:bg-ecgBlueDark transition-all">
+                        View Full History
+                    </button>
+                    <button onclick="closeStatusNotification()" class="w-full inline-flex justify-center rounded-xl border border-gray-200 px-6 py-3 bg-white text-sm font-bold text-gray-600 hover:bg-gray-50 transition-all">
+                        Dismiss Notification
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script type="module" src="app.js"></script>
 </body>
 

@@ -194,6 +194,7 @@ window.printSingleRequest = printSingleRequest;
 window.handleBulkPrint = handleBulkPrint;
 window.toggleSelectAllRequests = toggleSelectAllRequests;
 window.updateBulkPrintVisibility = updateBulkPrintVisibility;
+window.closeStatusNotification = closeStatusNotification;
 
 // DOM Loaded Initialization
 document.addEventListener('DOMContentLoaded', async () => {
@@ -306,7 +307,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function initPage(pageId) {
     // Guard is already handled in onAuthStateChanged — just init the correct page
-    if (pageId === 'page-dashboard') updateDashboard();
+    if (pageId === 'page-dashboard') {
+        updateDashboard();
+        checkRecentRequestStatus();
+    }
     else if (pageId === 'page-request') setupRequestForm();
     else if (pageId === 'page-history') renderHistory();
     else if (pageId === 'page-profile') setupProfile();
@@ -938,6 +942,66 @@ function updateDashboard() {
     document.getElementById('stat-approved').textContent = personalRequests.filter(r => r.status === 'Approved').length;
     document.getElementById('stat-pending').textContent = personalRequests.filter(r => r.status === 'Pending').length;
     document.getElementById('stat-rejected').textContent = personalRequests.filter(r => r.status === 'Rejected').length;
+}
+
+function checkRecentRequestStatus() {
+    if (!currentUser) return;
+
+    // Get personal requests, sorted by date (newest first)
+    const personal = medicalRequests
+        .filter(r => r.userId === currentUser.id)
+        .sort((a, b) => {
+            const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : new Date(a.timestamp || 0).getTime();
+            const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : new Date(b.timestamp || 0).getTime();
+            return tB - tA;
+        });
+
+    if (personal.length === 0) return;
+
+    const mostRecent = personal[0];
+    const storageKey = `seen_status_${currentUser.id}`;
+    const seenData = JSON.parse(localStorage.getItem(storageKey) || '{}');
+
+    // ONLY notify if status is Approved or Rejected AND it's different from what was last seen
+    if ((mostRecent.status === 'Approved' || mostRecent.status === 'Rejected') && 
+        (seenData.id !== mostRecent.id || seenData.status !== mostRecent.status)) {
+        
+        showStatusNotification(mostRecent);
+    }
+}
+
+function showStatusNotification(req) {
+    const modal = document.getElementById('status-notification-modal');
+    const title = document.getElementById('notification-title');
+    const msg = document.getElementById('notification-message');
+    const iconContainer = document.getElementById('notification-icon-container');
+
+    if (!modal || !title || !msg || !iconContainer) return;
+
+    if (req.status === 'Approved') {
+        title.textContent = 'Request Approved!';
+        title.className = 'text-2xl font-bold text-green-600 font-display mb-2';
+        msg.textContent = `Great news! Your medical request for ${req.patientName || 'yourself'} at ${req.hospital} has been approved. You can now download and print your form.`;
+        iconContainer.className = 'mx-auto flex items-center justify-center h-16 w-16 rounded-2xl mb-6 bg-green-50 text-green-500';
+        iconContainer.innerHTML = '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>';
+    } else {
+        title.textContent = 'Request Update';
+        title.className = 'text-2xl font-bold text-red-600 font-display mb-2';
+        msg.textContent = `Your medical request for ${req.patientName || 'yourself'} has been reviewed. Status: ${req.status}. ${req.rejection_reason ? 'Reason: ' + req.rejection_reason : 'Please check the history for details.'}`;
+        iconContainer.className = 'mx-auto flex items-center justify-center h-16 w-16 rounded-2xl mb-6 bg-red-50 text-red-500';
+        iconContainer.innerHTML = '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"></path></svg>';
+    }
+
+    modal.classList.remove('view-hidden');
+
+    // Store that we've seen this specific status
+    const storageKey = `seen_status_${currentUser.id}`;
+    localStorage.setItem(storageKey, JSON.stringify({ id: req.id, status: req.status }));
+}
+
+function closeStatusNotification() {
+    const modal = document.getElementById('status-notification-modal');
+    if (modal) modal.classList.add('view-hidden');
 }
 
 // Request Medical Attention Methods
