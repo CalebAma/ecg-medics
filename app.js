@@ -243,11 +243,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
 
                 // 3. Safe to load data and render the page
-                await refreshData();
-                handleAdminNavbar();
-                updateNavbarUser();
-                initPage(pageId);
-                hidePageLoader();
+                try {
+                    await refreshData();
+                    handleAdminNavbar();
+                    updateNavbarUser();
+                    initPage(pageId);
+                } catch (e) {
+                    console.error('Initialization Error:', e);
+                } finally {
+                    hidePageLoader();
+                }
 
             } else {
                 // User exists in Auth but not in Firestore — sign them out
@@ -625,8 +630,14 @@ function handleAdminNavbar() {
         adminLink.className = 'hover:text-ecgYellow px-3 py-2 rounded-md text-sm font-bold bg-white/10 border border-white/20 transition flex items-center text-white';
         adminLink.innerHTML = `<svg class="w-4 h-4 mr-1 text-ecgYellow" fill="currentColor" viewBox="0 0 20 20"><path d="M5 4a1 1 0 00-2 0v7.268a2 2 0 000 3.464V16a1 1 0 102 0v-1.268a2 2 0 000-3.464V4zM11 4a1 1 0 10-2 0v1.268a2 2 0 000 3.464V16a1 1 0 102 0v-7.268a2 2 0 000-3.464V4zM16 3a1 1 0 011 1v2.268a2 2 0 010 3.464V16a1 1 0 11-2 0V9.732a2 2 0 010-3.464V4a1 1 0 011-1z"></path></svg> Admin Console`;
 
-        navbar.insertBefore(divider, navbar.querySelector('button'));
-        navbar.insertBefore(adminLink, divider);
+        const refBtn = navbar.querySelector('button');
+        if (refBtn && refBtn.parentNode === navbar) {
+            navbar.insertBefore(divider, refBtn);
+            navbar.insertBefore(adminLink, divider);
+        } else {
+            navbar.appendChild(divider);
+            navbar.appendChild(adminLink);
+        }
     }
 }
 
@@ -1000,20 +1011,21 @@ function renderAdminAuditLogs() {
         div.className = 'bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between space-y-2 md:space-y-0';
 
         let actionColor = 'text-blue-600';
-        if (log.action.includes('Approved')) actionColor = 'text-green-600';
-        if (log.action.includes('Rejected')) actionColor = 'text-red-500';
-        if (log.action.includes('Deleted')) actionColor = 'text-red-700';
+        const action = log.action || '';
+        if (action.includes('Approved')) actionColor = 'text-green-600';
+        else if (action.includes('Rejected')) actionColor = 'text-red-500';
+        else if (action.includes('Deleted')) actionColor = 'text-red-700';
 
         div.innerHTML = `
             <div class="flex-1">
                 <div class="flex items-center space-x-2">
-                    <span class="text-xs font-bold px-2 py-0.5 bg-gray-100 text-gray-600 rounded uppercase tracking-tighter">${log.target_type || log.type}</span>
-                    <span class="text-sm font-bold ${actionColor}">${log.action}</span>
+                    <span class="text-xs font-bold px-2 py-0.5 bg-gray-100 text-gray-600 rounded uppercase tracking-tighter">${log.target_type || log.type || 'System'}</span>
+                    <span class="text-sm font-bold ${actionColor}">${action || 'Action'}</span>
                 </div>
-                <p class="text-sm text-gray-600 mt-1">${log.details}</p>
+                <p class="text-sm text-gray-600 mt-1">${log.details || ''}</p>
             </div>
             <div class="text-right">
-                <p class="text-xs font-bold text-gray-900">${log.admin_name || log.adminName}</p>
+                <p class="text-xs font-bold text-gray-900">${log.admin_name || log.adminName || 'System'}</p>
                 <p class="text-[10px] text-gray-400">${formatTimestamp(log.created_at || log.timestamp)}</p>
             </div>
         `;
