@@ -195,6 +195,7 @@ window.handleBulkPrint = handleBulkPrint;
 window.toggleSelectAllRequests = toggleSelectAllRequests;
 window.updateBulkPrintVisibility = updateBulkPrintVisibility;
 window.closeStatusNotification = closeStatusNotification;
+window.updateDistrictOptions = updateDistrictOptions;
 
 // DOM Loaded Initialization
 document.addEventListener('DOMContentLoaded', async () => {
@@ -1604,6 +1605,61 @@ function calculateAge(dobString) {
     return age;
 }
 
+const REGIONAL_DISTRICTS = {
+    "Greater Accra": [
+        { label: "Accra East Region", districts: ["Legon", "Madina", "Adenta", "Dodowa"] },
+        { label: "Accra West Region", districts: ["Kaneshie", "Dansoman", "Achimota", "Nsawam"] },
+        { label: "Tema Region", districts: ["Tema North", "Tema South", "Ashaiman", "Prampram"] }
+    ],
+    "Ashanti": [
+        { label: "Ashanti East", districts: ["Kumasi Central", "Asokwa", "Manhyia"] },
+        { label: "Ashanti South", districts: ["Obuasi", "Bekwai", "Manso"] },
+        { label: "Ashanti West", districts: ["Offinso", "Nkawie", "Bibiani"] }
+    ],
+    "Central": [
+        { districts: ["Cape Coast District Office", "Saltpond District Office", "Assin Fosu District Office", "Twifo Praso District Office", "Ajumako District Office", "Breman Asikuma District Office", "Winneba District Office"] }
+    ],
+    "Volta": [
+        { districts: ["Ho District Office", "Kpando District Office", "Akatsi District Office", "Sogakope District Office", "Keta District Office"] }
+    ]
+};
+
+function updateDistrictOptions(selectedDistrict = "") {
+    const regionSelect = document.getElementById('prof-staff-region');
+    const districtSelect = document.getElementById('prof-staff-district');
+    if (!regionSelect || !districtSelect) return;
+
+    const region = regionSelect.value;
+    districtSelect.innerHTML = '<option value="">Select District</option>';
+
+    if (region && REGIONAL_DISTRICTS[region]) {
+        REGIONAL_DISTRICTS[region].forEach(group => {
+            if (group.label) {
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = group.label;
+                group.districts.forEach(d => {
+                    const opt = document.createElement('option');
+                    opt.value = d;
+                    opt.textContent = d;
+                    optgroup.appendChild(opt);
+                });
+                districtSelect.appendChild(optgroup);
+            } else {
+                group.districts.forEach(d => {
+                    const opt = document.createElement('option');
+                    opt.value = d;
+                    opt.textContent = d;
+                    districtSelect.appendChild(opt);
+                });
+            }
+        });
+    }
+
+    if (selectedDistrict) {
+        districtSelect.value = selectedDistrict;
+    }
+}
+
 function setupProfile() {
     // Populate Staff Display Info
     if (document.getElementById('prof-staff-name')) {
@@ -1615,8 +1671,11 @@ function setupProfile() {
 
         document.getElementById('prof-staff-dob').value = currentUser.dob || '';
         document.getElementById('prof-staff-designation').value = currentUser.designation || '';
-        document.getElementById('prof-staff-region').value = currentUser.region || '';
-        document.getElementById('prof-staff-district').value = currentUser.district || '';
+        
+        if (currentUser.region) {
+            document.getElementById('prof-staff-region').value = currentUser.region;
+            updateDistrictOptions(currentUser.district);
+        }
     }
 
     if (currentUser.profilePic && document.getElementById('prof-pic-preview')) {
